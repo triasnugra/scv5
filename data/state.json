@@ -1,0 +1,81 @@
+{
+ "active": [],
+ "ai": {
+  "enabled": false,
+  "model": "claude-sonnet-5-5"
+ },
+ "data_sources": {
+  "BTCUSDT": "binance_vision",
+  "ETHUSDT": "binance_vision",
+  "HBARUSDT": "binance_vision",
+  "INJUSDT": "binance_vision",
+  "LTCUSDT": "binance_vision",
+  "PEPEUSDT": "binance_vision",
+  "SOLUSDT": "binance_vision",
+  "TRBUSDT": "binance_vision"
+ },
+ "errors": [],
+ "generated_at": "2026-11-15T09:32:55Z",
+ "generated_ts": 1794735175011,
+ "integrity": {
+  "head": "0000000000000000000000000000000000000000000000000000000000000000",
+  "message": "OK (0 catatan)",
+  "ok": true,
+  "records": 0
+ },
+ "recent": [],
+ "stats": {
+  "by_ai": {},
+  "by_direction": {},
+  "by_setup": {},
+  "by_symbol": {},
+  "equity_curve": [],
+  "fill_rate": null,
+  "filled": 0,
+  "not_filled": 0,
+  "overall": {
+   "avg_loss": null,
+   "avg_win": null,
+   "exp_ci": [
+    null,
+    null
+   ],
+   "expectancy": null,
+   "max_dd_r": 0.0,
+   "n": 0,
+   "profit_factor": null,
+   "sqn": null,
+   "sum_r": 0.0,
+   "win_rate": null,
+   "wins": 0,
+   "wr_ci": [
+    null,
+    null
+   ]
+  },
+  "protocol": {
+   "checks": {
+    "expectancy_ci_low": false,
+    "profit_factor": false,
+    "sqn": false
+   },
+   "min_trades": 150,
+   "min_weeks": 20,
+   "trades": 0,
+   "verdict": "BERJALAN",
+   "weeks": 0.0
+  },
+  "signals_total": 0
+ },
+ "strategy": {
+  "hash": "7da00c762ba88e707012db1ad0ec3db611f8319c5a7048c725900b2ac42aae19",
+  "protocol": {
+   "min_expectancy_ci_low": 0.0,
+   "min_profit_factor": 1.3,
+   "min_sqn": 1.6,
+   "min_trades": 150,
+   "min_weeks": 20
+  },
+  "version": "1.0"
+ }
+}
