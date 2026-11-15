@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scalp Engine · Metodologi @eliz883 + Claude</title>
+<style>
+:root{--bg:#0f1419;--card:#18202a;--line:#273241;--tx:#e6edf3;--mut:#8b9bb0;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#58a6ff}
+@media (prefers-color-scheme:light){:root{--bg:#f5f7fa;--card:#fff;--line:#d8dee6;--tx:#1b2430;--mut:#5b6b7e;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--acc:#0969da}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1200px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.sub{color:var(--mut);font-size:12px}.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.k{color:var(--mut);font-size:11px;text-transform:uppercase}.v{font-size:22px;font-weight:650}
+.pos{color:var(--ok)}.neg{color:var(--bad)}.warn{color:var(--warn)}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px}table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}th{color:var(--mut);font-size:11px;text-transform:uppercase}tr:last-child td{border-bottom:0}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;border:1px solid var(--line)}
+.TAKE{color:var(--ok)}.SKIP{color:var(--bad)}.WAIT{color:var(--warn)}
+.note{white-space:normal;max-width:420px;color:var(--mut);font-size:12px}
+.brief{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:10px;padding:12px;white-space:pre-wrap}
+.banner{padding:10px 12px;border-radius:10px;margin:10px 0;border:1px solid var(--line);background:var(--card)}
+svg{width:100%;height:180px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+</style>
+</head>
+<body><main>
+<h1>Scalp Engine <span class="sub">· metodologi @eliz883 + review Claude · forward-test PAPER (bukan uang sungguhan)</span></h1>
+<div class="sub" id="meta">memuat…</div>
+<div id="integrity"></div>
+
+<h2>Ringkasan pasar (Claude)</h2><div class="brief" id="brief">Belum ada ringkasan (butuh ANTHROPIC_API_KEY).</div>
+
+<h2>Protokol forward-test</h2><div class="grid" id="proto"></div>
+<h2>Statistik (R bersih setelah biaya)</h2><div class="grid" id="stats"></div>
+<h2>Kurva ekuitas (R kumulatif)</h2><div id="eq"></div>
+
+<h2>Watchlist & konteks</h2><div class="wrap"><table id="watch"></table></div>
+<h2>Sinyal aktif</h2><div class="wrap"><table id="active"></table></div>
+<h2>Riwayat terakhir</h2><div class="wrap"><table id="recent"></table></div>
+<h2>Per setup · per simbol · Aturan vs Claude</h2><div class="wrap"><table id="groups"></table></div>
+<p class="sub">Bukan nasihat keuangan. Semua angka hasil simulasi forward-test dengan aturan eksekusi konservatif; kinerja lalu tidak menjamin hasil ke depan. Jurnal berantai-hash: <a href="data/journal.jsonl" style="color:var(--acc)">journal.jsonl</a></p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f=(x,d=2)=>x==null?'–':(+x).toFixed(d);
+const px=x=>x==null?'–':(+x).toPrecision(6).replace(/\.?0+$/,'');
+const cls=x=>x==null?'':x>0?'pos':x<0?'neg':'';
+const T=ms=>ms?new Date(ms).toISOString().slice(5,16).replace('T',' ')+'Z':'–';
+async function J(p){try{const r=await fetch(p+'?t='+Date.now());if(!r.ok)return null;return await r.json()}catch(e){return null}}
+function table(el,head,rows){el.innerHTML='<thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.join(''):'<tr><td colspan="'+head.length+'" class="sub">Belum ada data.</td></tr>')+'</tbody>'}
+const card=(k,v,c='')=>`<div class="card"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`;
+function ai(a){if(!a)return '–';const v=a.verdict||'N/A';return `<span class="pill ${v}" title="${esc((a.reasons||[]).join(' | '))}">${v}${a.confidence!=null?' '+a.confidence:''}</span>`}
+async function main(){
+ const [S,M]=await Promise.all([J('data/state.json'),J('data/market.json')]);
+ if(!S){$('meta').textContent='Belum ada data. Jalankan workflow "scalp-engine" sekali (Actions → Run workflow).';return}
+ $('meta').textContent=`Diperbarui ${S.generated_at} · strategi v${S.strategy.version} (${S.strategy.hash.slice(0,10)}) · AI: ${S.ai.enabled?'aktif ('+esc(S.ai.model)+')':'nonaktif (tanpa API key)'} · sumber data: ${esc(Object.values(S.data_sources||{})[0]||'–')}`;
+ $('integrity').innerHTML=S.integrity.ok?'':`<div class="banner neg">INTEGRITAS JURNAL GAGAL: ${esc(S.integrity.message)}</div>`;
+ if(S.errors&&S.errors.length)$('integrity').innerHTML+=`<div class="banner warn">Sebagian data gagal diambil: ${esc(S.errors.slice(0,3).join(' · '))}</div>`;
+ if(M&&M.brief&&M.brief.text)$('brief').textContent=M.brief.text+'\n— '+M.brief.iso;
+ const P=S.stats.protocol,o=S.stats.overall;
+ $('proto').innerHTML=card('Status',P.verdict,P.verdict==='LULUS'?'pos':P.verdict==='GAGAL'?'neg':'warn')+card('Trade',`${P.trades} / ${P.min_trades}`)+card('Minggu',`${P.weeks} / ${P.min_weeks}`)+
+  card('CI95 expectancy > 0',P.checks.expectancy_ci_low?'ya':'belum',P.checks.expectancy_ci_low?'pos':'')+card('PF ≥ '+S.strategy.protocol.min_profit_factor,P.checks.profit_factor?'ya':'belum',P.checks.profit_factor?'pos':'')+card('SQN ≥ '+S.strategy.protocol.min_sqn,P.checks.sqn?'ya':'belum',P.checks.sqn?'pos':'');
+ $('stats').innerHTML=card('Win rate',o.win_rate==null?'–':f(o.win_rate*100,1)+'%')+card('Expectancy (R)',f(o.expectancy,3),cls(o.expectancy))+card('CI95 expectancy',o.exp_ci[0]==null?'–':`${f(o.exp_ci[0],2)} … ${f(o.exp_ci[1],2)}`)+
+  card('Profit factor',f(o.profit_factor))+card('SQN',f(o.sqn))+card('Total R',f(o.sum_r),cls(o.sum_r))+card('Max DD (R)',f(o.max_dd_r))+card('Fill rate',S.stats.fill_rate==null?'–':f(S.stats.fill_rate*100,0)+'%')+card('Sinyal',S.stats.signals_total);
+ // equity
+ const c=S.stats.equity_curve;
+ if(c.length>1){const w=1000,h=180,mx=Math.max(...c.map(p=>p.r),0),mn=Math.min(...c.map(p=>p.r),0),sp=(mx-mn)||1;
+  const pts=c.map((p,i)=>`${(i/(c.length-1)*(w-20)+10).toFixed(1)},${(h-15-((p.r-mn)/sp)*(h-30)).toFixed(1)}`).join(' ');
+  const z=(h-15-((0-mn)/sp)*(h-30)).toFixed(1);
+  $('eq').innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="0" x2="${w}" y1="${z}" y2="${z}" stroke="var(--line)" stroke-dasharray="4"/><polyline fill="none" stroke="var(--acc)" stroke-width="2" points="${pts}"/></svg>`}
+ else $('eq').innerHTML='<div class="sub">Butuh minimal 2 trade tertutup.</div>';
+ // watch
+ const W=M?Object.entries(M.symbols).map(([s,m])=>`<tr><td><b>${esc(s)}</b></td><td>${px(m.price)}</td><td>${esc(m.season||'–')}</td><td>${m.range?px(m.range.low)+' – '+px(m.range.high):'–'}</td><td>${m.range_pos==null?'–':f(m.range_pos*100,0)+'%'}</td><td><span class="pill">${esc(m.state)}</span></td><td class="note">${esc(m.note)}</td></tr>`):[];
+ table($('watch'),['Simbol','Harga','Musim H4','Range H1','Posisi','Status','Catatan'],W);
+ const row=s=>`<tr><td><b>${esc(s.symbol)}</b></td><td class="${s.direction==='LONG'?'pos':'neg'}">${s.direction}</td><td>${esc(s.setup)}</td><td>${px(s.entry)}</td><td>${px(s.stop)}</td><td>${px(s.tp1)}</td><td>${px(s.tp2)}</td><td>${f(s.rr1)}R</td><td>${s.score}</td><td>${ai(s.ai)}</td>`;
+ table($('active'),['Simbol','Arah','Setup','Entry','SL','TP1','TP2','R:R','Skor','Claude','Status','Dibuat','Alasan'],
+  S.active.map(s=>row(s)+`<td>${esc(s.status)}</td><td>${T(s.created_ts)}</td><td class="note">${esc((s.reasons||[]).join(' '))}${s.ai&&s.ai.reasons&&s.ai.reasons.length?'<br>Claude: '+esc(s.ai.reasons.join('; ')):''}</td></tr>`));
+ table($('recent'),['Simbol','Arah','Setup','Entry','SL','TP1','TP2','R:R','Skor','Claude','Hasil','R bersih','Tutup'],
+  S.recent.map(s=>row(s)+`<td>${esc(s.reason||s.status)}</td><td class="${cls(s.r_net)}">${s.r_net==null?'–':f(s.r_net)}</td><td>${T(s.close_ts)}</td></tr>`));
+ const g=[];const add=(t,o)=>Object.entries(o).forEach(([k,v])=>g.push(`<tr><td>${t}</td><td><b>${esc(k)}</b></td><td>${v.n}</td><td>${v.win_rate==null?'–':f(v.win_rate*100,0)+'%'}</td><td class="${cls(v.expectancy)}">${f(v.expectancy,3)}</td><td>${f(v.profit_factor)}</td><td class="${cls(v.sum_r)}">${f(v.sum_r)}</td></tr>`));
+ add('Setup',S.stats.by_setup);add('Simbol',S.stats.by_symbol);add('Claude',S.stats.by_ai);add('Arah',S.stats.by_direction);
+ table($('groups'),['Grup','Nilai','Trade','Win rate','Expectancy R','PF','Total R'],g);
+}
+main();setInterval(main,300000);
+</script>
+</body></html>

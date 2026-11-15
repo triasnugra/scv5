@@ -1,0 +1,108 @@
+{
+  "strategy_version": "1.0",
+
+  "universe": {
+    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "INJUSDT", "LTCUSDT", "PEPEUSDT", "TRBUSDT", "HBARUSDT"],
+    "context_symbol": "BTCUSDT"
+  },
+
+  "rules": {
+    "range": {
+      "end_offsets_h1": [3, 6, 12, 24],
+      "windows_h1": [72, 48, 36, 24],
+      "min_height_pct": 1.0,
+      "max_height_pct": 12.0,
+      "min_touches_each": 2,
+      "touch_tol_atr": 0.5,
+      "max_drift": 0.6,
+      "min_mid_crosses": 2
+    },
+    "deviation": {
+      "lookback_5m": 36,
+      "pierce_min_pct": 0.02,
+      "reclaim_margin_atr5": 0.1,
+      "max_outside_bars": 6,
+      "max_sweep_atr_h1": 1.2,
+      "entry_offset_atr5": 0.0,
+      "stop_buffer_atr5": 0.3,
+      "obv_window": 24,
+      "vol_spike_ratio": 1.8
+    },
+    "range_edge": {
+      "enabled": true,
+      "lookback_5m": 12,
+      "edge_zone_atr_h1": 0.35,
+      "wick_frac": 0.5,
+      "stop_buffer_atr_h1": 0.5
+    },
+    "breakout_retest": {
+      "enabled": true,
+      "break_buffer_atr_h1": 0.1,
+      "min_accept_h1": 2,
+      "max_age_h1": 12,
+      "entry_offset_atr5": 0.1,
+      "stop_atr_h1": 0.6,
+      "tp1_range_frac": 0.5,
+      "tp2_range_frac": 1.0
+    },
+    "monday": { "enabled": true },
+    "plan": {
+      "min_stop_pct": 0.30,
+      "max_stop_pct": 2.0,
+      "min_rr": 1.5,
+      "max_cost_r": 0.30,
+      "max_entry_distance_pct": 1.0,
+      "swing_pivot_n": 3
+    },
+    "scoring": {
+      "base": { "DEVIATION": 4, "BREAKOUT_RETEST": 3, "RANGE_EDGE": 2 },
+      "touches_ge3_bonus": 2,
+      "touches_ge2_bonus": 1,
+      "monday_bonus": 1,
+      "vol_spike_bonus": 1,
+      "obv_div_bonus": 1,
+      "obv_confirm_bonus": 1,
+      "season_align_bonus": 1,
+      "counter_season_penalty": 2,
+      "rr_ge2_bonus": 1,
+      "monday_choppy_penalty": 1
+    },
+    "filters": {
+      "min_score": 6,
+      "btc_shock_atr": 2.5,
+      "max_signals_per_hour": 2,
+      "symbol_cooldown_min": 180
+    }
+  },
+
+  "sim": {
+    "cost_pct": 0.10,
+    "fill_penetration_pct": 0.01,
+    "tp1_fraction": 0.6,
+    "expiry_min": 180,
+    "max_hold_min": 1440
+  },
+
+  "protocol": {
+    "min_trades": 150,
+    "min_weeks": 20,
+    "min_expectancy_ci_low": 0.0,
+    "min_profit_factor": 1.3,
+    "min_sqn": 1.6
+  },
+
+  "runtime": {
+    "data": {
+      "sources": ["binance_vision", "binance", "bybit", "okx"],
+      "limit_5m": 1000,
+      "limit_1h": 300,
+      "limit_4h": 220
+    },
+    "ai": {
+      "enabled": true,
+      "model": "claude-sonnet-5-5",
+      "max_reviews_per_run": 6,
+      "brief_interval_min": 60
+    }
+  }
+}
