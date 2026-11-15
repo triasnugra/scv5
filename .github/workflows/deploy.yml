@@ -1,0 +1,75 @@
+name: Run Scalp Engine & Publish to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Berjalan otomatis setiap 15 menit (sesuaikan kebutuhan)
+    - cron: "*/15 * * * *"
+  workflow_dispatch: # Tombol manual "Run workflow" di tab Actions
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Run unit tests
+        run: |
+          pytest -v
+
+      - name: Run scalp analysis engine
+        env:
+          # Tambahkan API key di Settings > Secrets and variables > Actions jika dipakai oleh ai.py / data.py
+          API_KEY: ${{ secrets.API_KEY }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: |
+          python -m scalp
+
+      - name: Commit updated output/journal (optional)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/
+          git diff --staged --quiet || git commit -m "chore: update scalp scan output [skip ci]"
+          git push
+
+      - name: Upload site artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "site"
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-and-run
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
