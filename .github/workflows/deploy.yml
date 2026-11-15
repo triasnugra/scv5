@@ -41,6 +41,14 @@ jobs:
         run: |
           pytest -v
 
+      - name: Restore scalp data & journal cache
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: scalp-data-${{ github.run_id }}
+          restore-keys: |
+            scalp-data-
+
       - name: Run scalp analysis engine & build site
         env:
           API_KEY: ${{ secrets.API_KEY }}
@@ -50,16 +58,20 @@ jobs:
         run: |
           mkdir -p data _site
           python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site run
+          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site verify
           python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site build-site
 
-      - name: Commit updated data/journal
+      - name: Commit updated data/journal (safe)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ -d data ] && ! git check-ignore -q data; then
             git add data/
-            git diff --staged --quiet || git commit -m "chore: update scalp journal & state [skip ci]"
-            git push
+            if ! git diff --staged --quiet; then
+              git commit -m "chore: update scalp journal & state [skip ci]"
+              git pull --rebase --autostash origin main || true
+              git push origin main || echo "::warning::Git push dilewati; state tetap tersimpan aman di Actions Cache."
+            fi
           fi
 
       - name: Upload site artifact for GitHub Pages
