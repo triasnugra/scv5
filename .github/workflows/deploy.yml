@@ -5,9 +5,8 @@ on:
     branches:
       - main
   schedule:
-    # Berjalan otomatis setiap 15 menit (sesuaikan kebutuhan)
     - cron: "*/15 * * * *"
-  workflow_dispatch: # Tombol manual "Run workflow" di tab Actions
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -42,26 +41,31 @@ jobs:
         run: |
           pytest -v
 
-      - name: Run scalp analysis engine
+      - name: Run scalp analysis engine & build site
         env:
-          # Tambahkan API key di Settings > Secrets and variables > Actions jika dipakai oleh ai.py / data.py
           API_KEY: ${{ secrets.API_KEY }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          python -m scalp
+          mkdir -p data _site
+          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site run
+          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site build-site
 
-      - name: Commit updated output/journal (optional)
+      - name: Commit updated data/journal
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/
-          git diff --staged --quiet || git commit -m "chore: update scalp scan output [skip ci]"
-          git push
+          if [ -d data ] && ! git check-ignore -q data; then
+            git add data/
+            git diff --staged --quiet || git commit -m "chore: update scalp journal & state [skip ci]"
+            git push
+          fi
 
       - name: Upload site artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "site"
+          path: "_site"
 
   deploy:
     environment:
