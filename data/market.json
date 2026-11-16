@@ -1,16 +1,16 @@
 {
  "brief": null,
  "btc": {
-  "label": "no_range",
-  "pos": null,
-  "price": 64949.23,
+  "label": "upper",
+  "pos": 0.748,
+  "price": 65128.78,
   "season": "short",
   "shock": false
  },
- "generated_at": "2026-11-16T07:42:13Z",
+ "generated_at": "2026-11-16T17:28:08Z",
  "symbols": {
   "BTCUSDT": {
-   "atr_h1_pct": 0.924,
+   "atr_h1_pct": 1.02,
    "monday": {
     "high": 75599.22,
     "low": 73750.0,
@@ -18,16 +18,31 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 64949.23,
-   "range": null,
-   "range_pos": null,
-   "rejects": {},
+   "note": "Di antara tepi dan tengah range; belum ada trigger.",
+   "price": 65128.78,
+   "range": {
+    "end_off": 3,
+    "end_t": 1794837600000,
+    "height": 1636.9999999999927,
+    "height_pct": 2.55,
+    "high": 65542.01,
+    "low": 63905.01,
+    "mid": 64723.509999999995,
+    "start_t": 1794751200000,
+    "touches_high": 4,
+    "touches_low": 2,
+    "window": 24
+   },
+   "range_pos": 0.748,
+   "rejects": {
+    "biaya_terlalu_besar": 1,
+    "entry_terlalu_jauh": 1
+   },
    "season": "short",
-   "state": "TANPA_RANGE"
+   "state": "MENUNGGU"
   },
   "ETHUSDT": {
-   "atr_h1_pct": 1.142,
+   "atr_h1_pct": 1.27,
    "monday": {
     "high": 2160.5,
     "low": 2083.1,
@@ -35,16 +50,28 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 1821.55,
-   "range": null,
-   "range_pos": null,
+   "note": "Ada kandidat setup; lihat daftar sinyal.",
+   "price": 1835.55,
+   "range": {
+    "end_off": 3,
+    "end_t": 1794837600000,
+    "height": 55.74000000000001,
+    "height_pct": 3.09,
+    "high": 1842.85,
+    "low": 1787.11,
+    "mid": 1814.98,
+    "start_t": 1794751200000,
+    "touches_high": 4,
+    "touches_low": 3,
+    "window": 24
+   },
+   "range_pos": 0.869,
    "rejects": {},
    "season": "short",
-   "state": "TANPA_RANGE"
+   "state": "SETUP"
   },
   "HBARUSDT": {
-   "atr_h1_pct": 1.199,
+   "atr_h1_pct": 1.276,
    "monday": {
     "high": 0.06892,
     "low": 0.06519,
@@ -53,27 +80,27 @@
     "start_t": 1794182400000
    },
    "note": "Di antara tepi dan tengah range; belum ada trigger.",
-   "price": 0.05871,
+   "price": 0.0581,
    "range": {
     "end_off": 3,
-    "end_t": 1794801600000,
-    "height": 0.005740000000000002,
-    "height_pct": 9.73,
-    "high": 0.06058,
-    "low": 0.05484,
-    "mid": 0.05771,
-    "start_t": 1794628800000,
+    "end_t": 1794837600000,
+    "height": 0.0019800000000000026,
+    "height_pct": 3.429,
+    "high": 0.05945,
+    "low": 0.05747,
+    "mid": 0.05846,
+    "start_t": 1794751200000,
     "touches_high": 2,
-    "touches_low": 2,
-    "window": 48
+    "touches_low": 4,
+    "window": 24
    },
-   "range_pos": 0.674,
+   "range_pos": 0.318,
    "rejects": {},
    "season": "short",
    "state": "MENUNGGU"
   },
   "INJUSDT": {
-   "atr_h1_pct": 2.132,
+   "atr_h1_pct": 2.207,
    "monday": {
     "high": 8.315,
     "low": 7.816,
@@ -81,16 +108,28 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 6.787,
-   "range": null,
-   "range_pos": null,
+   "note": "Di antara tepi dan tengah range; belum ada trigger.",
+   "price": 6.79,
+   "range": {
+    "end_off": 3,
+    "end_t": 1794837600000,
+    "height": 0.6509999999999998,
+    "height_pct": 9.699,
+    "high": 7.25,
+    "low": 6.599,
+    "mid": 6.9245,
+    "start_t": 1794708000000,
+    "touches_high": 2,
+    "touches_low": 3,
+    "window": 36
+   },
+   "range_pos": 0.293,
    "rejects": {},
    "season": "short",
-   "state": "TANPA_RANGE"
+   "state": "MENUNGGU"
   },
   "LTCUSDT": {
-   "atr_h1_pct": 1.175,
+   "atr_h1_pct": 1.253,
    "monday": {
     "high": 52.27,
     "low": 49.77,
@@ -99,27 +138,29 @@
     "start_t": 1794182400000
    },
    "note": "Di tengah range (no-man's-land). Tidak mengejar harga; tunggu sweep/trigger di tepi.",
-   "price": 44.95,
+   "price": 44.9,
    "range": {
     "end_off": 3,
-    "end_t": 1794801600000,
-    "height": 1.4699999999999989,
-    "height_pct": 3.272,
-    "high": 45.8,
-    "low": 44.33,
-    "mid": 45.065,
-    "start_t": 1794715200000,
+    "end_t": 1794837600000,
+    "height": 1.7000000000000028,
+    "height_pct": 3.827,
+    "high": 45.67,
+    "low": 43.97,
+    "mid": 44.82,
+    "start_t": 1794751200000,
     "touches_high": 2,
-    "touches_low": 3,
+    "touches_low": 2,
     "window": 24
    },
-   "range_pos": 0.422,
-   "rejects": {},
+   "range_pos": 0.547,
+   "rejects": {
+    "entry_terlalu_jauh": 2
+   },
    "season": "short",
    "state": "TENGAH_RANGE"
   },
   "PEPEUSDT": {
-   "atr_h1_pct": 1.995,
+   "atr_h1_pct": 2.076,
    "monday": {
     "high": 5.4e-06,
     "low": 4.93e-06,
@@ -127,16 +168,28 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 3.78e-06,
-   "range": null,
-   "range_pos": null,
+   "note": "Di tengah range (no-man's-land). Tidak mengejar harga; tunggu sweep/trigger di tepi.",
+   "price": 3.89e-06,
+   "range": {
+    "end_off": 3,
+    "end_t": 1794837600000,
+    "height": 3.0999999999999957e-07,
+    "height_pct": 8.115,
+    "high": 4.02e-06,
+    "low": 3.71e-06,
+    "mid": 3.864999999999999e-06,
+    "start_t": 1794751200000,
+    "touches_high": 2,
+    "touches_low": 2,
+    "window": 24
+   },
+   "range_pos": 0.581,
    "rejects": {},
    "season": "short",
-   "state": "TANPA_RANGE"
+   "state": "TENGAH_RANGE"
   },
   "SOLUSDT": {
-   "atr_h1_pct": 1.378,
+   "atr_h1_pct": 1.489,
    "monday": {
     "high": 88.46,
     "low": 85.14,
@@ -144,16 +197,28 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 71.47,
-   "range": null,
-   "range_pos": null,
+   "note": "Di tengah range (no-man's-land). Tidak mengejar harga; tunggu sweep/trigger di tepi.",
+   "price": 71.85,
+   "range": {
+    "end_off": 3,
+    "end_t": 1794837600000,
+    "height": 2.510000000000005,
+    "height_pct": 3.543,
+    "high": 72.95,
+    "low": 70.44,
+    "mid": 71.695,
+    "start_t": 1794751200000,
+    "touches_high": 3,
+    "touches_low": 3,
+    "window": 24
+   },
+   "range_pos": 0.562,
    "rejects": {},
    "season": "short",
-   "state": "TANPA_RANGE"
+   "state": "TENGAH_RANGE"
   },
   "TRBUSDT": {
-   "atr_h1_pct": 1.272,
+   "atr_h1_pct": 1.306,
    "monday": {
     "high": 15.56,
     "low": 14.68,
@@ -161,25 +226,25 @@
     "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Di tengah range (no-man's-land). Tidak mengejar harga; tunggu sweep/trigger di tepi.",
-   "price": 13.06,
+   "note": "Di antara tepi dan tengah range; belum ada trigger.",
+   "price": 13.22,
    "range": {
-    "end_off": 3,
-    "end_t": 1794801600000,
-    "height": 0.4499999999999993,
-    "height_pct": 3.391,
+    "end_off": 6,
+    "end_t": 1794826800000,
+    "height": 0.41999999999999993,
+    "height_pct": 3.218,
     "high": 13.35,
-    "low": 12.9,
-    "mid": 13.125,
-    "start_t": 1794715200000,
-    "touches_high": 4,
+    "low": 12.93,
+    "mid": 13.14,
+    "start_t": 1794740400000,
+    "touches_high": 3,
     "touches_low": 2,
     "window": 24
    },
-   "range_pos": 0.356,
+   "range_pos": 0.69,
    "rejects": {},
    "season": "short",
-   "state": "TENGAH_RANGE"
+   "state": "MENUNGGU"
   }
  }
 }

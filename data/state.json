@@ -1,5 +1,69 @@
 {
- "active": [],
+ "active": [
+  {
+   "ai": {
+    "verdict": "N/A"
+   },
+   "btc": {
+    "label": "upper",
+    "pos": 0.748,
+    "season": "short"
+   },
+   "close_ts": null,
+   "cost_r": 0.07,
+   "created_iso": "2026-11-16T17:28:08Z",
+   "created_ts": 1794850088269,
+   "direction": "SHORT",
+   "entry": 1842.85,
+   "expiry_ts": 1794860888269,
+   "fill_ts": null,
+   "flags": {
+    "obv_confirm": false,
+    "obv_div": false,
+    "sweep_depth_atr_h1": 1.03,
+    "vol_ratio": 8.15,
+    "vol_spike": true
+   },
+   "id": "ETHUSDT-20261116T172808Z-DEV",
+   "level": {
+    "kind": "range_high",
+    "monday": false,
+    "price": 1842.85,
+    "touches": 4
+   },
+   "price_at_signal": 1835.55,
+   "r_gross": null,
+   "r_net": null,
+   "reason": null,
+   "reasons": [
+    "Sweep di atas range_high 1842.85 (ekstrem 1866.89), lalu reclaim close kembali ke dalam; tunggu retest di 1842.85."
+   ],
+   "risk_pct": 1.4194,
+   "rr1": 1.85,
+   "rr2": 2.67,
+   "score": 7,
+   "score_notes": [
+    "dasar DEVIATION +4",
+    "level diuji 4x +2",
+    "lonjakan volume saat sweep +1",
+    "searah musim H4 +1",
+    "Senin (range Monday choppy) -1"
+   ],
+   "season": "short",
+   "setup": "DEVIATION",
+   "sim_from_ts": 1794849900000,
+   "status": "PENDING",
+   "stop": 1869.0071466394634,
+   "strategy_hash": "7da00c762ba88e707012db1ad0ec3db611f8319c5a7048c725900b2ac42aae19",
+   "strategy_version": "1.0",
+   "symbol": "ETHUSDT",
+   "tp1": 1794.43,
+   "tp1_label": "swing low H1",
+   "tp1_ts": null,
+   "tp2": 1773.13,
+   "tp2_label": "swing low H1"
+  }
+ ],
  "ai": {
   "enabled": false,
   "model": "claude-sonnet-5-5"
@@ -15,13 +79,13 @@
   "TRBUSDT": "binance_vision"
  },
  "errors": [],
- "generated_at": "2026-11-16T07:42:13Z",
- "generated_ts": 1794814933399,
+ "generated_at": "2026-11-16T17:28:08Z",
+ "generated_ts": 1794850088269,
  "integrity": {
-  "head": "0000000000000000000000000000000000000000000000000000000000000000",
-  "message": "OK (0 catatan)",
+  "head": "31f2545ddfa1372953585fe64b6f0caf9f4597078e4397e85659e4b8f8aa8382",
+  "message": "OK (1 catatan)",
   "ok": true,
-  "records": 0
+  "records": 1
  },
  "recent": [],
  "stats": {
@@ -65,7 +129,7 @@
    "verdict": "BERJALAN",
    "weeks": 0.0
   },
-  "signals_total": 0
+  "signals_total": 1
  },
  "strategy": {
   "hash": "7da00c762ba88e707012db1ad0ec3db611f8319c5a7048c725900b2ac42aae19",
