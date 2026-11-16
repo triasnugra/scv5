@@ -3,23 +3,23 @@
  "btc": {
   "label": "no_range",
   "pos": null,
-  "price": 65151.99,
+  "price": 65036.01,
   "season": "short",
   "shock": false
  },
- "generated_at": "2026-11-15T21:09:55Z",
+ "generated_at": "2026-11-16T00:59:11Z",
  "symbols": {
   "BTCUSDT": {
-   "atr_h1_pct": 1.052,
+   "atr_h1_pct": 0.995,
    "monday": {
     "high": 75599.22,
     "low": 73750.0,
     "mid": 74674.61,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 65151.99,
+   "price": 65036.01,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -27,16 +27,16 @@
    "state": "TANPA_RANGE"
   },
   "ETHUSDT": {
-   "atr_h1_pct": 1.302,
+   "atr_h1_pct": 1.241,
    "monday": {
     "high": 2160.5,
     "low": 2083.1,
     "mid": 2121.8,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 1826.68,
+   "price": 1819.25,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -44,45 +44,33 @@
    "state": "TANPA_RANGE"
   },
   "HBARUSDT": {
-   "atr_h1_pct": 1.385,
+   "atr_h1_pct": 1.331,
    "monday": {
     "high": 0.06892,
     "low": 0.06519,
     "mid": 0.067055,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
-   "note": "Di antara tepi dan tengah range; belum ada trigger.",
-   "price": 0.05896,
-   "range": {
-    "end_off": 6,
-    "end_t": 1794754800000,
-    "height": 0.0059000000000000025,
-    "height_pct": 10.153,
-    "high": 0.06074,
-    "low": 0.05484,
-    "mid": 0.05779,
-    "start_t": 1794625200000,
-    "touches_high": 2,
-    "touches_low": 2,
-    "window": 36
-   },
-   "range_pos": 0.698,
+   "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
+   "price": 0.05902,
+   "range": null,
+   "range_pos": null,
    "rejects": {},
    "season": "short",
-   "state": "MENUNGGU"
+   "state": "TANPA_RANGE"
   },
   "INJUSDT": {
-   "atr_h1_pct": 2.471,
+   "atr_h1_pct": 2.329,
    "monday": {
     "high": 8.315,
     "low": 7.816,
     "mid": 8.0655,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 6.998,
+   "price": 6.895,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -90,16 +78,16 @@
    "state": "TANPA_RANGE"
   },
   "LTCUSDT": {
-   "atr_h1_pct": 1.319,
+   "atr_h1_pct": 1.208,
    "monday": {
     "high": 52.27,
     "low": 49.77,
     "mid": 51.02,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 45.48,
+   "price": 45.25,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -107,16 +95,16 @@
    "state": "TANPA_RANGE"
   },
   "PEPEUSDT": {
-   "atr_h1_pct": 2.164,
+   "atr_h1_pct": 2.079,
    "monday": {
     "high": 5.4e-06,
     "low": 4.93e-06,
     "mid": 5.1650000000000005e-06,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 3.88e-06,
+   "price": 3.82e-06,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -124,16 +112,16 @@
    "state": "TANPA_RANGE"
   },
   "SOLUSDT": {
-   "atr_h1_pct": 1.485,
+   "atr_h1_pct": 1.403,
    "monday": {
     "high": 88.46,
     "low": 85.14,
     "mid": 86.8,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 71.93,
+   "price": 72.07,
    "range": null,
    "range_pos": null,
    "rejects": {},
@@ -141,16 +129,16 @@
    "state": "TANPA_RANGE"
   },
   "TRBUSDT": {
-   "atr_h1_pct": 1.313,
+   "atr_h1_pct": 1.229,
    "monday": {
     "high": 15.56,
     "low": 14.68,
     "mid": 15.120000000000001,
-    "prev_week": false,
+    "prev_week": true,
     "start_t": 1794182400000
    },
    "note": "Tidak ada range H1 valid (trending / belum terbentuk). Tidak ada keunggulan: tunggu.",
-   "price": 13.25,
+   "price": 13.23,
    "range": null,
    "range_pos": null,
    "rejects": {},
