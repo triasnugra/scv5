@@ -1,0 +1,653 @@
+--- a/scalp/engine.py
++++ b/scalp/engine.py
+@@ -1,4 +1,5 @@
+-"""Orkestrator: ambil data -> nilai sinyal lama -> cari setup baru -> review Claude -> catat jurnal -> tulis JSON dashboard."""
++"""Orkestrator: ambil data -> cek kualitas data -> nilai sinyal lama -> cek batas risiko -> cari setup baru
++-> review Claude -> catat jurnal (+ukuran posisi) -> tulis JSON dashboard."""
+ import json
+ import os
+ import time
+@@ -7,15 +8,14 @@
+ from . import ai as ai_mod
+ from .context import build_btc_context, position_label, range_position, season
+ from .data import Provider
++from .dataq import check_candles
+ from .journal import M5_MS, Journal, replay, simulate
++from .risk import OPEN_STATUSES, gate_reasons, position_plan, risk_state
+ from .setups import generate_candidates
++from .signals import build_record, choose_signals, iso
+ from .stats import build_stats
+ 
+ 
+-def iso(ms):
+-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+-
+-
+ def _write_json(path, obj):
+     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+     tmp = path + ".tmp"
+@@ -39,9 +39,35 @@
+     return "MENUNGGU", "Di antara tepi dan tengah range; belum ada trigger."
+ 
+ 
++def load_market_data(provider, symbols, rt, rules, now_ms, log):
++    """Ambil 5m/1h/4h per simbol + saring dengan cek kualitas data. Return (data, errors)."""
++    dq = rules.get("data_quality")
++    data, errors = {}, []
++    for s in symbols:
++        try:
++            d = {
++                "5m": provider.get(s, "5m", rt["data"]["limit_5m"], now_ms),
++                "1h": provider.get(s, "1h", rt["data"]["limit_1h"], now_ms),
++                "4h": provider.get(s, "4h", rt["data"]["limit_4h"], now_ms),
++            }
++        except Exception as e:  # noqa: BLE001
++            errors.append(f"{s}: {e}")
++            log(f"[data] {s} dilewati: {e}")
++            continue
++        bad = []
++        for iv, cs in d.items():
++            bad += [f"{iv}:{r}" for r in check_candles(cs, iv, now_ms, dq)]
++        if bad:
++            errors.append(f"{s}: DATAQ {', '.join(bad)}")
++            log(f"[dataq] {s} dilewati: {', '.join(bad)}")
++            continue
++        data[s] = d
++    return data, errors
++
++
+ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
+     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+-    rt = cfg["runtime"]
++    rt, rules = cfg["runtime"], cfg["rules"]
+     shash = cfg["_hash"]
+     j = Journal(journal_path)
+     ok, msg = j.verify()
+@@ -53,18 +79,8 @@
+     if ctx_sym not in symbols:
+         symbols = [ctx_sym] + symbols
+ 
+-    # 1) data
+-    data, errors = {}, []
+-    for s in symbols:
+-        try:
+-            data[s] = {
+-                "5m": provider.get(s, "5m", rt["data"]["limit_5m"], now_ms),
+-                "1h": provider.get(s, "1h", rt["data"]["limit_1h"], now_ms),
+-                "4h": provider.get(s, "4h", rt["data"]["limit_4h"], now_ms),
+-            }
+-        except Exception as e:  # noqa: BLE001
+-            errors.append(f"{s}: {e}")
+-            log(f"[data] {s} dilewati: {e}")
++    # 1) data (+ kualitas)
++    data, errors = load_market_data(provider, symbols, rt, rules, now_ms, log)
+ 
+     # 2) nilai sinyal lama (simulasi ulang deterministik, tambahkan hanya event baru)
+     sigs = replay(j.records)
+@@ -88,13 +104,21 @@
+                 have = rank
+     sigs = replay(j.records)
+ 
+-    # 3) konteks BTC
++    # 3) status protokol + batas risiko (diturunkan dari jurnal)
++    stats_now = build_stats(sigs, shash, now_ms, cfg["protocol"])
++    verdict = stats_now["protocol"]["verdict"]
++    limits = rules.get("risk_limits")
++    rstate = risk_state(sigs, shash, now_ms, limits)
++    blocked = gate_reasons(rstate, limits, now_ms)
++    if blocked:
++        log(f"[risiko] sinyal baru ditahan: {', '.join(blocked)}")
++
++    # 4) konteks BTC
+     btc_ctx = build_btc_context(data.get(ctx_sym), cfg)
+ 
+-    # 4) cari kandidat baru
++    # 5) cari kandidat baru
+     weekday = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).weekday()
+-    flt = cfg["rules"]["filters"]
+-    active_syms = {s["symbol"] for s in sigs.values() if s["status"] in ("PENDING", "OPEN", "OPEN_TP1")}
++    flt = rules["filters"]
+     market, pool = {}, []
+     for sym, d in data.items():
+         cands, info, rejects = generate_candidates(sym, d, cfg, now_ms, weekday)
+@@ -103,28 +127,12 @@
+         market[sym] = (info, d)
+         for c in cands:
+             pool.append((c, info, d))
+-    pool = [p for p in pool if p[0]["score"] >= flt["min_score"]]
+     if btc_ctx.get("shock"):
+         log("[filter] BTC shock: tidak ada sinyal baru")
+-        pool = []
+-    last_sig_ts = {}
+-    for s in sigs.values():
+-        last_sig_ts[s["symbol"]] = max(last_sig_ts.get(s["symbol"], 0), s["created_ts"])
+-    hour_count = sum(1 for s in sigs.values() if now_ms - s["created_ts"] < 3_600_000)
+-    pool.sort(key=lambda p: -p[0]["score"])
+-    chosen, seen = [], set()
+-    for c, info, d in pool:
+-        sym = c["symbol"]
+-        if sym in active_syms or sym in seen:
+-            continue
+-        if now_ms - last_sig_ts.get(sym, 0) < flt["symbol_cooldown_min"] * 60_000:
+-            continue
+-        if hour_count + len(chosen) >= flt["max_signals_per_hour"]:
+-            break
+-        chosen.append((c, info, d))
+-        seen.add(sym)
++    chosen = choose_signals(pool, sigs, flt, now_ms, shock=bool(btc_ctx.get("shock")), blocked=blocked)
++    active_syms = {s["symbol"] for s in sigs.values() if s["status"] in OPEN_STATUSES}
+ 
+-    # 5) review Claude (opsional)
++    # 6) review Claude (opsional)
+     key = ai_mod.get_key()
+     ai_on = bool(rt["ai"]["enabled"] and key)
+     reviews = 0
+@@ -138,31 +146,18 @@
+                 log(f"[ai] review gagal {c['symbol']}: {e}")
+                 c["ai"] = {"verdict": "N/A", "error": str(e)[:120]}
+ 
+-    # 6) catat sinyal baru
++    # 7) catat sinyal baru (+ ukuran posisi)
++    account = rt.get("account")
+     for c, info, d in chosen:
+-        last = d["5m"][-1]
+-        sid = f"{c['symbol']}-{iso(now_ms).replace(':', '').replace('-', '')}-{c['setup'][:3]}"
+-        rec = {
+-            "id": sid, "symbol": c["symbol"], "setup": c["setup"], "direction": c["direction"],
+-            "entry": c["entry"], "stop": c["stop"], "tp1": c["tp1"], "tp2": c["tp2"],
+-            "tp1_label": c["tp1_label"], "tp2_label": c["tp2_label"],
+-            "risk_pct": c["risk_pct"], "rr1": c["rr1"], "rr2": c["rr2"], "cost_r": c["cost_r"],
+-            "score": c["score"], "score_notes": c["score_notes"], "level": c["level"], "flags": c["flags"],
+-            "reasons": c["reasons"], "season": c["season"], "price_at_signal": c["price_at_signal"],
+-            "created_ts": now_ms, "created_iso": iso(now_ms),
+-            "sim_from_ts": last.t + M5_MS,
+-            "expiry_ts": now_ms + cfg["sim"]["expiry_min"] * 60_000,
+-            "strategy_hash": shash, "strategy_version": cfg["strategy_version"],
+-            "btc": {k: btc_ctx.get(k) for k in ("season", "pos", "label")},
+-            "ai": c["ai"],
+-        }
++        sizing = position_plan(c["entry"], c["stop"], account, verdict)
++        rec = build_record(c, d, now_ms, cfg, btc_ctx, sizing)
+         j.append("SIGNAL", rec, now_ms)
+-        log(f"[sinyal] {sid} {c['direction']} entry={c['entry']:.6g} sl={c['stop']:.6g} "
++        log(f"[sinyal] {rec['id']} {c['direction']} entry={c['entry']:.6g} sl={c['stop']:.6g} "
+             f"tp1={c['tp1']:.6g} skor={c['score']} AI={c['ai'].get('verdict')}")
+     j.flush()
+     sigs = replay(j.records)
+ 
+-    # 7) keluaran dashboard
++    # 8) keluaran dashboard
+     chosen_syms = {c["symbol"] for c, _, _ in chosen}
+     mk = {}
+     for sym, (info, d) in market.items():
+@@ -175,13 +170,14 @@
+                    "rejects": info.get("rejects", {})}
+     stats = build_stats(sigs, shash, now_ms, cfg["protocol"])
+     mine = [s for s in sigs.values() if s["strategy_hash"] == shash]
+-    active = sorted([s for s in mine if s["status"] in ("PENDING", "OPEN", "OPEN_TP1")], key=lambda s: -s["created_ts"])
++    active = sorted([s for s in mine if s["status"] in OPEN_STATUSES], key=lambda s: -s["created_ts"])
+     recent = sorted([s for s in mine if s["status"] in ("CLOSED", "EXPIRED")], key=lambda s: -(s["close_ts"] or 0))[:60]
+     ok2, msg2 = j.verify()
+     _write_json(os.path.join(out_dir, "state.json"), {
+         "generated_at": iso(now_ms), "generated_ts": now_ms,
+         "strategy": {"version": cfg["strategy_version"], "hash": shash, "protocol": cfg["protocol"]},
+         "integrity": {"ok": ok2, "message": msg2, "records": len(j.records), "head": j.last_hash},
++        "risk": {"state": risk_state(sigs, shash, now_ms, limits), "halted": blocked, "limits": limits},
+         "stats": stats, "active": active, "recent": recent,
+         "ai": {"enabled": ai_on, "model": os.environ.get("ANTHROPIC_MODEL") or rt["ai"]["model"]},
+         "data_sources": provider.used if hasattr(provider, "used") else {}, "errors": errors[:10],
+@@ -191,7 +187,8 @@
+         "generated_at": iso(now_ms), "btc": {k: btc_ctx.get(k) for k in ("season", "pos", "label", "shock", "price")},
+         "symbols": mk, "brief": brief_text,
+     })
+-    return {"new_signals": len(chosen), "new_events": new_events, "errors": errors, "symbols": len(data)}
++    return {"new_signals": len(chosen), "new_events": new_events, "errors": errors,
++            "symbols": len(data), "risk_halt": blocked}
+ 
+ 
+ def _maybe_brief(out_dir, mk, btc_ctx, ai_on, key, rt, now_ms, log):
+--- a/scalp/stats.py
++++ b/scalp/stats.py
+@@ -1,5 +1,6 @@
+ """Statistik forward-test: win rate (Wilson), profit factor, expectancy (R) + CI, SQN (Van Tharp), drawdown."""
+ import math
++import random
+ 
+ 
+ def wilson(wins, n, z=1.96):
+@@ -41,11 +42,41 @@
+     }
+ 
+ 
++DAY_MS = 86_400_000
++
++
++def boot_ci_by_day(pairs, iters=2000, seed=7, alpha=0.05, min_days=5):
++    """Bootstrap CI expectancy dengan resampling PER HARI (cluster).
++
++    Sinyal antar-koin pada hari yang sama saling berkorelasi, jadi CI per-trade terlalu optimistis.
++    pairs: list[(day_id, r)]. Deterministik (seed tetap). Return [lo, hi] atau [None, None] bila hari < min_days.
++    """
++    groups = {}
++    for day, r in pairs:
++        groups.setdefault(day, []).append(r)
++    days = list(groups.values())
++    if len(days) < min_days:
++        return [None, None]
++    rng = random.Random(seed)
++    means = []
++    for _ in range(iters):
++        samp = [days[rng.randrange(len(days))] for _ in days]
++        cnt = sum(len(g) for g in samp)
++        if cnt:
++            means.append(sum(sum(g) for g in samp) / cnt)
++    means.sort()
++    lo = means[int(alpha / 2 * len(means))]
++    hi = means[min(len(means) - 1, int((1 - alpha / 2) * len(means)))]
++    return [round(lo, 4), round(hi, 4)]
++
++
+ def protocol_status(overall, first_ts, now_ms, proto):
+     weeks = 0.0 if not first_ts else (now_ms - first_ts) / (7 * 86_400_000)
+     ready = overall["n"] >= proto["min_trades"] and weeks >= proto["min_weeks"]
+     checks = {
+-        "expectancy_ci_low": overall["exp_ci"][0] is not None and overall["exp_ci"][0] > proto["min_expectancy_ci_low"],
++        "expectancy_ci_low": overall["exp_ci"][0] is not None and overall["exp_ci"][0] > proto["min_expectancy_ci_low"]
++        and (overall.get("exp_ci_day") or [None])[0] is not None
++        and overall["exp_ci_day"][0] > proto["min_expectancy_ci_low"],
+         "profit_factor": overall["profit_factor"] is not None and overall["profit_factor"] >= proto["min_profit_factor"],
+         "sqn": overall["sqn"] is not None and overall["sqn"] >= proto["min_sqn"],
+     }
+@@ -65,6 +96,7 @@
+     filled = len(closed) + len([s for s in mine if s["status"] in ("OPEN", "OPEN_TP1")])
+     rs = [s["r_net"] for s in closed]
+     overall = summarize(rs)
++    overall["exp_ci_day"] = boot_ci_by_day([(s["close_ts"] // DAY_MS, s["r_net"]) for s in closed])
+ 
+     def group(key):
+         out = {}
+--- a/scalp/journal.py
++++ b/scalp/journal.py
+@@ -102,6 +102,8 @@
+     risk = abs(E - S)
+     risk_pct = risk / E * 100
+     cost_r = sim["cost_pct"] / risk_pct
++    # slippage exit (stop = order market): memperburuk SL, BE, dan TIMEOUT. Default 0 = perilaku lama.
++    slip_r = sim.get("stop_slip_pct", 0.0) / risk_pct
+     f = sim["tp1_fraction"]
+     r1 = (T1 - E) * sgn / risk
+     r2 = (T2 - E) * sgn / risk
+@@ -130,30 +132,30 @@
+                 ev.append(("FILL", {"id": sig["id"], "ts": c.t, "price": E}))
+                 status, fill_t = "OPEN", c.t
+                 if hit_sl:
+-                    close(c.t, "SL", -1.0)
++                    close(c.t, "SL", -1.0 - slip_r)
+                     return ev
+             continue
+         # posisi terbuka
+         if status == "OPEN":
+             if hit_sl:
+-                close(c.t, "SL", -1.0)
++                close(c.t, "SL", -1.0 - slip_r)
+                 return ev
+             if (c.h >= T1) if long_ else (c.l <= T1):
+                 ev.append(("TP1", {"id": sig["id"], "ts": c.t, "price": T1}))
+                 status = "OPEN_TP1"
+                 continue
+             if c.t - fill_t >= max_hold:
+-                close(c.t, "TIMEOUT", (c.c - E) * sgn / risk)
++                close(c.t, "TIMEOUT", (c.c - E) * sgn / risk - slip_r)
+                 return ev
+         elif status == "OPEN_TP1":
+             hit_be = (c.l <= E) if long_ else (c.h >= E)
+             if hit_be:
+-                close(c.t, "BE", f * r1)
++                close(c.t, "BE", f * r1 - (1 - f) * slip_r)
+                 return ev
+             if (c.h >= T2) if long_ else (c.l <= T2):
+                 close(c.t, "TP2", f * r1 + (1 - f) * r2)
+                 return ev
+             if c.t - fill_t >= max_hold:
+-                close(c.t, "TIMEOUT", f * r1 + (1 - f) * (c.c - E) * sgn / risk)
++                close(c.t, "TIMEOUT", f * r1 + (1 - f) * ((c.c - E) * sgn / risk - slip_r))
+                 return ev
+     return ev
+--- a/scalp/__main__.py
++++ b/scalp/__main__.py
+@@ -1,5 +1,7 @@
+-"""CLI:  python -m scalp run | verify | build-site"""
++"""CLI:  python -m scalp run | verify | build-site | backtest"""
+ import argparse
++import json
++import time
+ import os
+ import shutil
+ import sys
+@@ -13,11 +15,15 @@
+ 
+ def main(argv=None):
+     ap = argparse.ArgumentParser(prog="scalp")
+-    ap.add_argument("cmd", choices=["run", "verify", "build-site"])
++    ap.add_argument("cmd", choices=["run", "verify", "build-site", "backtest"])
+     ap.add_argument("--config", default=None)
+     ap.add_argument("--data-dir", default=os.path.join(ROOT, "data"))
+     ap.add_argument("--site-src", default=os.path.join(ROOT, "site"))
+     ap.add_argument("--site-out", default=os.path.join(ROOT, "_site"))
++    ap.add_argument("--days", type=int, default=30, help="backtest: jumlah hari ke belakang")
++    ap.add_argument("--step-min", type=int, default=15, help="backtest: langkah scan (menit), live = 15")
++    ap.add_argument("--symbols", default=None, help="backtest: daftar simbol dipisah koma (default: universe config)")
++    ap.add_argument("--out", default=None, help="backtest: file JSON keluaran")
+     a = ap.parse_args(argv)
+     cfg = load_config(a.config)
+     jpath = os.path.join(a.data_dir, "journal.jsonl")
+@@ -31,13 +37,34 @@
+         print(res)
+         # gagal keras hanya bila TIDAK ada data sama sekali (mis. semua sumber diblokir)
+         return 0 if res["symbols"] > 0 else 2
++    if a.cmd == "backtest":
++        from .backtest import fetch_all_history, run_backtest
++        syms = [x.strip() for x in a.symbols.split(",")] if a.symbols else list(cfg["universe"]["symbols"])
++        ctx = cfg["universe"]["context_symbol"]
++        if ctx not in syms:
++            syms = [ctx] + syms
++        end_ms = int(time.time() * 1000)
++        end_ms -= end_ms % 3_600_000
++        start_ms = end_ms - a.days * 86_400_000
++        hist = fetch_all_history(syms, start_ms, end_ms, cfg["runtime"])
++        res = run_backtest(cfg, hist, start_ms, end_ms, a.step_min * 60_000)
++        o = res["overall"]
++        print(f"signals={res['signals_total']} filled={res['filled']} fill_rate={res['fill_rate']}")
++        print(f"n={o['n']} win={o['win_rate']} exp={o['expectancy']} ci={o['exp_ci']} ci_day={o['exp_ci_day']} "
++              f"pf={o['profit_factor']} sqn={o['sqn']} maxdd={o['max_dd_r']}")
++        out = a.out or os.path.join(a.data_dir, "backtest.json")
++        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
++        with open(out, "w", encoding="utf-8") as f:
++            json.dump(res, f, ensure_ascii=False, indent=1, sort_keys=True)
++        print("ditulis:", out)
++        return 0
+     if a.cmd == "build-site":
+         if os.path.exists(a.site_out):
+             shutil.rmtree(a.site_out)
+         shutil.copytree(a.site_src, a.site_out)
+         dst = os.path.join(a.site_out, "data")
+         os.makedirs(dst, exist_ok=True)
+-        for fn in ("state.json", "market.json", "brief.json", "journal.jsonl"):
++        for fn in ("state.json", "market.json", "brief.json", "journal.jsonl", "backtest.json"):
+             p = os.path.join(a.data_dir, fn)
+             if os.path.exists(p):
+                 shutil.copy(p, dst)
+--- a/config/strategy.json
++++ b/config/strategy.json
+@@ -1,15 +1,32 @@
+ {
+-  "strategy_version": "1.0",
+-
++  "strategy_version": "1.1",
+   "universe": {
+-    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "INJUSDT", "LTCUSDT", "PEPEUSDT", "TRBUSDT", "HBARUSDT"],
++    "symbols": [
++      "BTCUSDT",
++      "ETHUSDT",
++      "SOLUSDT",
++      "INJUSDT",
++      "LTCUSDT",
++      "PEPEUSDT",
++      "TRBUSDT",
++      "HBARUSDT"
++    ],
+     "context_symbol": "BTCUSDT"
+   },
+-
+   "rules": {
+     "range": {
+-      "end_offsets_h1": [3, 6, 12, 24],
+-      "windows_h1": [72, 48, 36, 24],
++      "end_offsets_h1": [
++        3,
++        6,
++        12,
++        24
++      ],
++      "windows_h1": [
++        72,
++        48,
++        36,
++        24
++      ],
+       "min_height_pct": 1.0,
+       "max_height_pct": 12.0,
+       "min_touches_each": 2,
+@@ -45,17 +62,23 @@
+       "tp1_range_frac": 0.5,
+       "tp2_range_frac": 1.0
+     },
+-    "monday": { "enabled": true },
++    "monday": {
++      "enabled": true
++    },
+     "plan": {
+-      "min_stop_pct": 0.30,
++      "min_stop_pct": 0.3,
+       "max_stop_pct": 2.0,
+       "min_rr": 1.5,
+-      "max_cost_r": 0.30,
++      "max_cost_r": 0.3,
+       "max_entry_distance_pct": 1.0,
+       "swing_pivot_n": 3
+     },
+     "scoring": {
+-      "base": { "DEVIATION": 4, "BREAKOUT_RETEST": 3, "RANGE_EDGE": 2 },
++      "base": {
++        "DEVIATION": 4,
++        "BREAKOUT_RETEST": 3,
++        "RANGE_EDGE": 2
++      },
+       "touches_ge3_bonus": 2,
+       "touches_ge2_bonus": 1,
+       "monday_bonus": 1,
+@@ -71,18 +94,40 @@
+       "min_score": 6,
+       "btc_shock_atr": 2.5,
+       "max_signals_per_hour": 2,
+-      "symbol_cooldown_min": 180
++      "symbol_cooldown_min": 180,
++      "allow_short": true,
++      "max_open_total": 4
++    },
++    "risk_limits": {
++      "max_daily_loss_r": 3.0,
++      "loss_streak_pause": 3,
++      "loss_streak_cooldown_min": 120,
++      "dd_window_days": 7,
++      "dd_pause_r": 8.0,
++      "dd_pause_hours": 24,
++      "max_signals_per_day": 6
++    },
++    "data_quality": {
++      "min_bars": {
++        "5m": 120,
++        "1h": 100,
++        "4h": 0
++      },
++      "max_stale_bars": 2,
++      "gap_window": 150,
++      "max_gap_bars": 6,
++      "max_zero_volume_frac": 0.3,
++      "zero_volume_window": 60
+     }
+   },
+-
+   "sim": {
+-    "cost_pct": 0.10,
++    "cost_pct": 0.1,
+     "fill_penetration_pct": 0.01,
+     "tp1_fraction": 0.6,
+     "expiry_min": 180,
+-    "max_hold_min": 1440
++    "max_hold_min": 1440,
++    "stop_slip_pct": 0.0
+   },
+-
+   "protocol": {
+     "min_trades": 150,
+     "min_weeks": 20,
+@@ -90,10 +135,14 @@
+     "min_profit_factor": 1.3,
+     "min_sqn": 1.6
+   },
+-
+   "runtime": {
+     "data": {
+-      "sources": ["binance_vision", "binance", "bybit", "okx"],
++      "sources": [
++        "binance_vision",
++        "binance",
++        "bybit",
++        "okx"
++      ],
+       "limit_5m": 1000,
+       "limit_1h": 300,
+       "limit_4h": 220
+@@ -103,6 +152,12 @@
+       "model": "claude-sonnet-5-5",
+       "max_reviews_per_run": 6,
+       "brief_interval_min": 60
++    },
++    "account": {
++      "equity_usd": 1000,
++      "risk_pct_pre_protocol": 0.25,
++      "risk_pct_post_protocol": 0.5,
++      "max_leverage": 3
+     }
+   }
+ }
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -5,7 +5,7 @@
+     branches:
+       - main
+   schedule:
+-    - cron: "*/15 * * * *"
++    - cron: "*/15 * * * *"      # best-effort: GitHub bisa menunda beberapa menit
+   workflow_dispatch:
+ 
+ permissions:
+@@ -17,9 +17,16 @@
+   group: "pages"
+   cancel-in-progress: false
+ 
++env:
++  # Profil strategi: 'strategy' (default) atau 'strategy.spot' (biaya spot, tanpa short, tanpa leverage).
++  # Ubah lewat Settings -> Secrets and variables -> Actions -> Variables -> STRATEGY_PROFILE.
++  # PERHATIAN: mengganti profil = hash strategi berubah = epoch forward-test BARU.
++  STRATEGY_PROFILE: ${{ vars.STRATEGY_PROFILE || 'strategy' }}
++
+ jobs:
+   build-and-run:
+     runs-on: ubuntu-latest
++    timeout-minutes: 15
+ 
+     steps:
+       - name: Checkout repository
+@@ -29,50 +36,60 @@
+         uses: actions/setup-python@v5
+         with:
+           python-version: "3.11"
+-          cache: "pip"
+ 
+-      - name: Install dependencies
+-        run: |
+-          python -m pip install --upgrade pip
+-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+-          pip install pytest
++      - name: Install test dependency
++        run: python -m pip install pytest
+ 
++      # Tes menjadi gerbang saat kode berubah (push/manual). Run terjadwal tidak diblok tes
++      # supaya satu tes rapuh tidak mematikan pemantauan; kode tidak berubah antar run terjadwal.
+       - name: Run unit tests
+-        run: |
+-          pytest -v
+-
+-      - name: Restore scalp data & journal cache
+-        uses: actions/cache@v4
+-        with:
+-          path: data
+-          key: scalp-data-${{ github.run_id }}
+-          restore-keys: |
+-            scalp-data-
++        if: github.event_name != 'schedule'
++        run: python -m pytest -q
+ 
+-      - name: Run scalp analysis engine & build site
++      - name: Run scalp engine
+         env:
+-          API_KEY: ${{ secrets.API_KEY }}
+-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
++          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
++          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+         run: |
+           mkdir -p data _site
+-          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site run
+-          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site verify
+-          python -m scalp --config config/strategy.json --data-dir data --site-src site --site-out _site build-site
++          python -m scalp --config "config/${STRATEGY_PROFILE}.json" --data-dir data --site-src site --site-out _site run
++
++      - name: Verify journal chain
++        run: python -m scalp --config "config/${STRATEGY_PROFILE}.json" --data-dir data verify
+ 
+-      - name: Commit updated data/journal (safe)
++      - name: Build site
++        run: python -m scalp --config "config/${STRATEGY_PROFILE}.json" --data-dir data --site-src site --site-out _site build-site
++
++      # SATU sumber kebenaran = git. Hanya jurnal (dan brief AI) yang perlu dipersist; state/market dibuat ulang tiap run.
++      # Kegagalan menyimpan jurnal = run GAGAL (tidak ada deploy), bukan peringatan yang terlewat.
++      - name: Persist journal to repo
+         run: |
++          set -e
+           git config user.name "github-actions[bot]"
+           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+-          if [ -d data ] && ! git check-ignore -q data; then
+-            git add data/
+-            if ! git diff --staged --quiet; then
+-              git commit -m "chore: update scalp journal & state [skip ci]"
+-              git pull --rebase --autostash origin main || true
+-              git push origin main || echo "::warning::Git push dilewati; state tetap tersimpan aman di Actions Cache."
++          for f in data/journal.jsonl data/brief.json; do
++            if [ -f "$f" ]; then git add "$f"; fi
++          done
++          if git diff --staged --quiet; then
++            echo "jurnal tidak berubah"
++            exit 0
++          fi
++          git commit -m "chore: update scalp journal [skip ci]"
++          ok=0
++          for i in 1 2 3; do
++            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then
++              ok=1
++              break
+             fi
++            echo "push gagal (percobaan $i)"
++            git rebase --abort 2>/dev/null || true
++            sleep $((i * 5))
++          done
++          if [ "$ok" != "1" ]; then
++            echo "::error::Gagal menyimpan jurnal ke repo setelah 3 percobaan"
++            exit 1
+           fi
++          python -m scalp --config "config/${STRATEGY_PROFILE}.json" --data-dir data verify
+ 
+       - name: Upload site artifact for GitHub Pages
+         uses: actions/upload-pages-artifact@v3
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,4 +1,2 @@
+-requests>=2.31.0
+-pandas>=2.1.0
+-numpy>=1.26.0
+-python-dotenv>=1.0.0
++# Mesin ini stdlib-only. Hanya pytest untuk pengujian.
++pytest>=7.4
