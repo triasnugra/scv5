@@ -102,6 +102,8 @@ def simulate(sig, candles, now_ms, sim):
     risk = abs(E - S)
     risk_pct = risk / E * 100
     cost_r = sim["cost_pct"] / risk_pct
+    # slippage exit (stop = order market): memperburuk SL, BE, dan TIMEOUT. Default 0 = perilaku lama.
+    slip_r = sim.get("stop_slip_pct", 0.0) / risk_pct
     f = sim["tp1_fraction"]
     r1 = (T1 - E) * sgn / risk
     r2 = (T2 - E) * sgn / risk
@@ -130,30 +132,30 @@ def simulate(sig, candles, now_ms, sim):
                 ev.append(("FILL", {"id": sig["id"], "ts": c.t, "price": E}))
                 status, fill_t = "OPEN", c.t
                 if hit_sl:
-                    close(c.t, "SL", -1.0)
+                    close(c.t, "SL", -1.0 - slip_r)
                     return ev
             continue
         # posisi terbuka
         if status == "OPEN":
             if hit_sl:
-                close(c.t, "SL", -1.0)
+                close(c.t, "SL", -1.0 - slip_r)
                 return ev
             if (c.h >= T1) if long_ else (c.l <= T1):
                 ev.append(("TP1", {"id": sig["id"], "ts": c.t, "price": T1}))
                 status = "OPEN_TP1"
                 continue
             if c.t - fill_t >= max_hold:
-                close(c.t, "TIMEOUT", (c.c - E) * sgn / risk)
+                close(c.t, "TIMEOUT", (c.c - E) * sgn / risk - slip_r)
                 return ev
         elif status == "OPEN_TP1":
             hit_be = (c.l <= E) if long_ else (c.h >= E)
             if hit_be:
-                close(c.t, "BE", f * r1)
+                close(c.t, "BE", f * r1 - (1 - f) * slip_r)
                 return ev
             if (c.h >= T2) if long_ else (c.l <= T2):
                 close(c.t, "TP2", f * r1 + (1 - f) * r2)
                 return ev
             if c.t - fill_t >= max_hold:
-                close(c.t, "TIMEOUT", f * r1 + (1 - f) * (c.c - E) * sgn / risk)
+                close(c.t, "TIMEOUT", f * r1 + (1 - f) * ((c.c - E) * sgn / risk - slip_r))
                 return ev
     return ev

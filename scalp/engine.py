@@ -1,4 +1,5 @@
-"""Orkestrator: ambil data -> nilai sinyal lama -> cari setup baru -> review Claude -> catat jurnal -> tulis JSON dashboard."""
+"""Orkestrator: ambil data -> cek kualitas data -> nilai sinyal lama -> cek batas risiko -> cari setup baru
+-> review Claude -> catat jurnal (+ukuran posisi) -> tulis JSON dashboard."""
 import json
 import os
 import time
@@ -7,13 +8,12 @@ from datetime import datetime, timezone
 from . import ai as ai_mod
 from .context import build_btc_context, position_label, range_position, season
 from .data import Provider
+from .dataq import check_candles
 from .journal import M5_MS, Journal, replay, simulate
+from .risk import OPEN_STATUSES, gate_reasons, position_plan, risk_state
 from .setups import generate_candidates
+from .signals import build_record, choose_signals, iso
 from .stats import build_stats
-
-
-def iso(ms):
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _write_json(path, obj):
@@ -39,9 +39,35 @@ def _market_note(info, has_setup):
     return "MENUNGGU", "Di antara tepi dan tengah range; belum ada trigger."
 
 
+def load_market_data(provider, symbols, rt, rules, now_ms, log):
+    """Ambil 5m/1h/4h per simbol + saring dengan cek kualitas data. Return (data, errors)."""
+    dq = rules.get("data_quality")
+    data, errors = {}, []
+    for s in symbols:
+        try:
+            d = {
+                "5m": provider.get(s, "5m", rt["data"]["limit_5m"], now_ms),
+                "1h": provider.get(s, "1h", rt["data"]["limit_1h"], now_ms),
+                "4h": provider.get(s, "4h", rt["data"]["limit_4h"], now_ms),
+            }
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{s}: {e}")
+            log(f"[data] {s} dilewati: {e}")
+            continue
+        bad = []
+        for iv, cs in d.items():
+            bad += [f"{iv}:{r}" for r in check_candles(cs, iv, now_ms, dq)]
+        if bad:
+            errors.append(f"{s}: DATAQ {', '.join(bad)}")
+            log(f"[dataq] {s} dilewati: {', '.join(bad)}")
+            continue
+        data[s] = d
+    return data, errors
+
+
 def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
     now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
-    rt = cfg["runtime"]
+    rt, rules = cfg["runtime"], cfg["rules"]
     shash = cfg["_hash"]
     j = Journal(journal_path)
     ok, msg = j.verify()
@@ -53,18 +79,8 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
     if ctx_sym not in symbols:
         symbols = [ctx_sym] + symbols
 
-    # 1) data
-    data, errors = {}, []
-    for s in symbols:
-        try:
-            data[s] = {
-                "5m": provider.get(s, "5m", rt["data"]["limit_5m"], now_ms),
-                "1h": provider.get(s, "1h", rt["data"]["limit_1h"], now_ms),
-                "4h": provider.get(s, "4h", rt["data"]["limit_4h"], now_ms),
-            }
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{s}: {e}")
-            log(f"[data] {s} dilewati: {e}")
+    # 1) data (+ kualitas)
+    data, errors = load_market_data(provider, symbols, rt, rules, now_ms, log)
 
     # 2) nilai sinyal lama (simulasi ulang deterministik, tambahkan hanya event baru)
     sigs = replay(j.records)
@@ -88,13 +104,21 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
                 have = rank
     sigs = replay(j.records)
 
-    # 3) konteks BTC
+    # 3) status protokol + batas risiko (diturunkan dari jurnal)
+    stats_now = build_stats(sigs, shash, now_ms, cfg["protocol"])
+    verdict = stats_now["protocol"]["verdict"]
+    limits = rules.get("risk_limits")
+    rstate = risk_state(sigs, shash, now_ms, limits)
+    blocked = gate_reasons(rstate, limits, now_ms)
+    if blocked:
+        log(f"[risiko] sinyal baru ditahan: {', '.join(blocked)}")
+
+    # 4) konteks BTC
     btc_ctx = build_btc_context(data.get(ctx_sym), cfg)
 
-    # 4) cari kandidat baru
+    # 5) cari kandidat baru
     weekday = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).weekday()
-    flt = cfg["rules"]["filters"]
-    active_syms = {s["symbol"] for s in sigs.values() if s["status"] in ("PENDING", "OPEN", "OPEN_TP1")}
+    flt = rules["filters"]
     market, pool = {}, []
     for sym, d in data.items():
         cands, info, rejects = generate_candidates(sym, d, cfg, now_ms, weekday)
@@ -103,28 +127,12 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
         market[sym] = (info, d)
         for c in cands:
             pool.append((c, info, d))
-    pool = [p for p in pool if p[0]["score"] >= flt["min_score"]]
     if btc_ctx.get("shock"):
         log("[filter] BTC shock: tidak ada sinyal baru")
-        pool = []
-    last_sig_ts = {}
-    for s in sigs.values():
-        last_sig_ts[s["symbol"]] = max(last_sig_ts.get(s["symbol"], 0), s["created_ts"])
-    hour_count = sum(1 for s in sigs.values() if now_ms - s["created_ts"] < 3_600_000)
-    pool.sort(key=lambda p: -p[0]["score"])
-    chosen, seen = [], set()
-    for c, info, d in pool:
-        sym = c["symbol"]
-        if sym in active_syms or sym in seen:
-            continue
-        if now_ms - last_sig_ts.get(sym, 0) < flt["symbol_cooldown_min"] * 60_000:
-            continue
-        if hour_count + len(chosen) >= flt["max_signals_per_hour"]:
-            break
-        chosen.append((c, info, d))
-        seen.add(sym)
+    chosen = choose_signals(pool, sigs, flt, now_ms, shock=bool(btc_ctx.get("shock")), blocked=blocked)
+    active_syms = {s["symbol"] for s in sigs.values() if s["status"] in OPEN_STATUSES}
 
-    # 5) review Claude (opsional)
+    # 6) review Claude (opsional)
     key = ai_mod.get_key()
     ai_on = bool(rt["ai"]["enabled"] and key)
     reviews = 0
@@ -138,31 +146,18 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
                 log(f"[ai] review gagal {c['symbol']}: {e}")
                 c["ai"] = {"verdict": "N/A", "error": str(e)[:120]}
 
-    # 6) catat sinyal baru
+    # 7) catat sinyal baru (+ ukuran posisi)
+    account = rt.get("account")
     for c, info, d in chosen:
-        last = d["5m"][-1]
-        sid = f"{c['symbol']}-{iso(now_ms).replace(':', '').replace('-', '')}-{c['setup'][:3]}"
-        rec = {
-            "id": sid, "symbol": c["symbol"], "setup": c["setup"], "direction": c["direction"],
-            "entry": c["entry"], "stop": c["stop"], "tp1": c["tp1"], "tp2": c["tp2"],
-            "tp1_label": c["tp1_label"], "tp2_label": c["tp2_label"],
-            "risk_pct": c["risk_pct"], "rr1": c["rr1"], "rr2": c["rr2"], "cost_r": c["cost_r"],
-            "score": c["score"], "score_notes": c["score_notes"], "level": c["level"], "flags": c["flags"],
-            "reasons": c["reasons"], "season": c["season"], "price_at_signal": c["price_at_signal"],
-            "created_ts": now_ms, "created_iso": iso(now_ms),
-            "sim_from_ts": last.t + M5_MS,
-            "expiry_ts": now_ms + cfg["sim"]["expiry_min"] * 60_000,
-            "strategy_hash": shash, "strategy_version": cfg["strategy_version"],
-            "btc": {k: btc_ctx.get(k) for k in ("season", "pos", "label")},
-            "ai": c["ai"],
-        }
+        sizing = position_plan(c["entry"], c["stop"], account, verdict)
+        rec = build_record(c, d, now_ms, cfg, btc_ctx, sizing)
         j.append("SIGNAL", rec, now_ms)
-        log(f"[sinyal] {sid} {c['direction']} entry={c['entry']:.6g} sl={c['stop']:.6g} "
+        log(f"[sinyal] {rec['id']} {c['direction']} entry={c['entry']:.6g} sl={c['stop']:.6g} "
             f"tp1={c['tp1']:.6g} skor={c['score']} AI={c['ai'].get('verdict')}")
     j.flush()
     sigs = replay(j.records)
 
-    # 7) keluaran dashboard
+    # 8) keluaran dashboard
     chosen_syms = {c["symbol"] for c, _, _ in chosen}
     mk = {}
     for sym, (info, d) in market.items():
@@ -175,13 +170,14 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
                    "rejects": info.get("rejects", {})}
     stats = build_stats(sigs, shash, now_ms, cfg["protocol"])
     mine = [s for s in sigs.values() if s["strategy_hash"] == shash]
-    active = sorted([s for s in mine if s["status"] in ("PENDING", "OPEN", "OPEN_TP1")], key=lambda s: -s["created_ts"])
+    active = sorted([s for s in mine if s["status"] in OPEN_STATUSES], key=lambda s: -s["created_ts"])
     recent = sorted([s for s in mine if s["status"] in ("CLOSED", "EXPIRED")], key=lambda s: -(s["close_ts"] or 0))[:60]
     ok2, msg2 = j.verify()
     _write_json(os.path.join(out_dir, "state.json"), {
         "generated_at": iso(now_ms), "generated_ts": now_ms,
         "strategy": {"version": cfg["strategy_version"], "hash": shash, "protocol": cfg["protocol"]},
         "integrity": {"ok": ok2, "message": msg2, "records": len(j.records), "head": j.last_hash},
+        "risk": {"state": risk_state(sigs, shash, now_ms, limits), "halted": blocked, "limits": limits},
         "stats": stats, "active": active, "recent": recent,
         "ai": {"enabled": ai_on, "model": os.environ.get("ANTHROPIC_MODEL") or rt["ai"]["model"]},
         "data_sources": provider.used if hasattr(provider, "used") else {}, "errors": errors[:10],
@@ -191,7 +187,8 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
         "generated_at": iso(now_ms), "btc": {k: btc_ctx.get(k) for k in ("season", "pos", "label", "shock", "price")},
         "symbols": mk, "brief": brief_text,
     })
-    return {"new_signals": len(chosen), "new_events": new_events, "errors": errors, "symbols": len(data)}
+    return {"new_signals": len(chosen), "new_events": new_events, "errors": errors,
+            "symbols": len(data), "risk_halt": blocked}
 
 
 def _maybe_brief(out_dir, mk, btc_ctx, ai_on, key, rt, now_ms, log):

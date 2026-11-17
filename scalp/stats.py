@@ -1,5 +1,6 @@
 """Statistik forward-test: win rate (Wilson), profit factor, expectancy (R) + CI, SQN (Van Tharp), drawdown."""
 import math
+import random
 
 
 def wilson(wins, n, z=1.96):
@@ -41,11 +42,41 @@ def summarize(rs):
     }
 
 
+DAY_MS = 86_400_000
+
+
+def boot_ci_by_day(pairs, iters=2000, seed=7, alpha=0.05, min_days=5):
+    """Bootstrap CI expectancy dengan resampling PER HARI (cluster).
+
+    Sinyal antar-koin pada hari yang sama saling berkorelasi, jadi CI per-trade terlalu optimistis.
+    pairs: list[(day_id, r)]. Deterministik (seed tetap). Return [lo, hi] atau [None, None] bila hari < min_days.
+    """
+    groups = {}
+    for day, r in pairs:
+        groups.setdefault(day, []).append(r)
+    days = list(groups.values())
+    if len(days) < min_days:
+        return [None, None]
+    rng = random.Random(seed)
+    means = []
+    for _ in range(iters):
+        samp = [days[rng.randrange(len(days))] for _ in days]
+        cnt = sum(len(g) for g in samp)
+        if cnt:
+            means.append(sum(sum(g) for g in samp) / cnt)
+    means.sort()
+    lo = means[int(alpha / 2 * len(means))]
+    hi = means[min(len(means) - 1, int((1 - alpha / 2) * len(means)))]
+    return [round(lo, 4), round(hi, 4)]
+
+
 def protocol_status(overall, first_ts, now_ms, proto):
     weeks = 0.0 if not first_ts else (now_ms - first_ts) / (7 * 86_400_000)
     ready = overall["n"] >= proto["min_trades"] and weeks >= proto["min_weeks"]
     checks = {
-        "expectancy_ci_low": overall["exp_ci"][0] is not None and overall["exp_ci"][0] > proto["min_expectancy_ci_low"],
+        "expectancy_ci_low": overall["exp_ci"][0] is not None and overall["exp_ci"][0] > proto["min_expectancy_ci_low"]
+        and (overall.get("exp_ci_day") or [None])[0] is not None
+        and overall["exp_ci_day"][0] > proto["min_expectancy_ci_low"],
         "profit_factor": overall["profit_factor"] is not None and overall["profit_factor"] >= proto["min_profit_factor"],
         "sqn": overall["sqn"] is not None and overall["sqn"] >= proto["min_sqn"],
     }
@@ -65,6 +96,7 @@ def build_stats(sigs, strategy_hash, now_ms, proto):
     filled = len(closed) + len([s for s in mine if s["status"] in ("OPEN", "OPEN_TP1")])
     rs = [s["r_net"] for s in closed]
     overall = summarize(rs)
+    overall["exp_ci_day"] = boot_ci_by_day([(s["close_ts"] // DAY_MS, s["r_net"]) for s in closed])
 
     def group(key):
         out = {}
