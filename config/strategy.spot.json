@@ -1,5 +1,5 @@
 {
-  "strategy_version": "1.1",
+  "strategy_version": "1.2-ElizStrict-spot",
   "universe": {
     "symbols": [
       "BTCUSDT",
@@ -7,11 +7,15 @@
       "SOLUSDT",
       "INJUSDT",
       "LTCUSDT",
-      "PEPEUSDT",
-      "TRBUSDT",
-      "HBARUSDT"
+      "TRBUSDT"
     ],
-    "context_symbol": "BTCUSDT"
+    "context_symbol": "BTCUSDT",
+    "priority_majors": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT"
+    ],
+    "alt_size_mult": 0.4
   },
   "rules": {
     "range": {
@@ -27,137 +31,130 @@
         36,
         24
       ],
-      "min_height_pct": 1.0,
-      "max_height_pct": 12.0,
+      "min_height_pct": 1.2,
+      "max_height_pct": 10.0,
       "min_touches_each": 2,
-      "touch_tol_atr": 0.5,
-      "max_drift": 0.6,
+      "touch_tol_atr": 0.45,
+      "max_drift": 0.55,
       "min_mid_crosses": 2
     },
     "deviation": {
-      "lookback_5m": 36,
-      "pierce_min_pct": 0.02,
-      "reclaim_margin_atr5": 0.1,
-      "max_outside_bars": 6,
-      "max_sweep_atr_h1": 1.2,
-      "entry_offset_atr5": 0.0,
-      "stop_buffer_atr5": 0.3,
+      "lookback_5m": 48,
+      "pierce_min_pct": 0.03,
+      "reclaim_margin_atr5": 0.15,
+      "max_outside_bars": 5,
+      "max_sweep_atr_h1": 1.0,
+      "entry_offset_atr5": 0.05,
+      "stop_buffer_atr5": 0.45,
       "obv_window": 24,
-      "vol_spike_ratio": 1.8
+      "vol_spike_ratio": 2.2,
+      "require_retest": true,
+      "retest_lookback_5m": 18,
+      "min_reclaim_bars": 1
     },
     "range_edge": {
-      "enabled": true,
+      "enabled": false,
       "lookback_5m": 12,
-      "edge_zone_atr_h1": 0.35,
-      "wick_frac": 0.5,
-      "stop_buffer_atr_h1": 0.5
+      "edge_zone_atr_h1": 0.3,
+      "wick_frac": 0.55,
+      "stop_buffer_atr_h1": 0.55
     },
     "breakout_retest": {
       "enabled": true,
-      "break_buffer_atr_h1": 0.1,
+      "break_buffer_atr_h1": 0.12,
       "min_accept_h1": 2,
-      "max_age_h1": 12,
-      "entry_offset_atr5": 0.1,
-      "stop_atr_h1": 0.6,
-      "tp1_range_frac": 0.5,
-      "tp2_range_frac": 1.0
+      "max_age_h1": 10,
+      "entry_offset_atr5": 0.08,
+      "stop_atr_h1": 0.55,
+      "tp1_range_frac": 0.45,
+      "tp2_range_frac": 0.95
     },
     "monday": {
       "enabled": true
     },
     "plan": {
-      "min_stop_pct": 0.3,
-      "max_stop_pct": 2.0,
-      "min_rr": 1.5,
-      "max_cost_r": 0.3,
-      "max_entry_distance_pct": 1.0,
+      "min_stop_pct": 0.35,
+      "max_stop_pct": 1.6,
+      "min_rr": 1.7,
+      "max_cost_r": 0.22,
+      "max_entry_distance_pct": 0.7,
       "swing_pivot_n": 3
     },
     "scoring": {
       "base": {
-        "DEVIATION": 4,
+        "DEVIATION": 5,
         "BREAKOUT_RETEST": 3,
-        "RANGE_EDGE": 2
+        "RANGE_EDGE": 1
       },
       "touches_ge3_bonus": 2,
       "touches_ge2_bonus": 1,
       "monday_bonus": 1,
-      "vol_spike_bonus": 1,
+      "vol_spike_bonus": 2,
       "obv_div_bonus": 1,
       "obv_confirm_bonus": 1,
-      "season_align_bonus": 1,
-      "counter_season_penalty": 2,
+      "season_align_bonus": 2,
+      "counter_season_penalty": 3,
       "rr_ge2_bonus": 1,
-      "monday_choppy_penalty": 1
+      "rr_ge25_bonus": 1,
+      "monday_choppy_penalty": 2,
+      "mid_range_penalty": 4,
+      "major_bonus": 1,
+      "strong_reclaim_bonus": 1
     },
     "filters": {
-      "min_score": 6,
-      "btc_shock_atr": 2.5,
-      "max_signals_per_hour": 2,
-      "symbol_cooldown_min": 180,
+      "min_score": 7.5,
+      "btc_shock_atr": 2.2,
+      "max_signals_per_hour": 1,
+      "symbol_cooldown_min": 240,
       "allow_short": false,
-      "max_open_total": 4
+      "max_open_total": 2,
+      "ban_mid_range": true,
+      "mid_range_low": 0.38,
+      "mid_range_high": 0.62,
+      "prefer_majors_in_chop": true
     },
     "risk_limits": {
-      "max_daily_loss_r": 3.0,
-      "loss_streak_pause": 3,
-      "loss_streak_cooldown_min": 120,
+      "max_daily_loss_r": 2.0,
+      "loss_streak_pause": 2,
+      "loss_streak_cooldown_min": 240,
       "dd_window_days": 7,
-      "dd_pause_r": 8.0,
-      "dd_pause_hours": 24,
-      "max_signals_per_day": 6
+      "dd_pause_r": 5.0,
+      "dd_pause_hours": 36,
+      "max_signals_per_day": 3
     },
     "data_quality": {
       "min_bars": {
-        "5m": 120,
-        "1h": 100,
-        "4h": 0
-      },
-      "max_stale_bars": 2,
-      "gap_window": 150,
-      "max_gap_bars": 6,
-      "max_zero_volume_frac": 0.3,
-      "zero_volume_window": 60
+        "5m": 150,
+        "1h": 120,
+        "4h": 60
+      }
     }
   },
   "sim": {
-    "cost_pct": 0.2,
+    "cost_pct": 0.12,
+    "stop_slip_pct": 0.02,
+    "expiry_min": 90,
     "fill_penetration_pct": 0.01,
     "tp1_fraction": 0.6,
-    "expiry_min": 180,
-    "max_hold_min": 1440,
-    "stop_slip_pct": 0.03
+    "move_sl_to_be_after_tp1": true
   },
   "protocol": {
-    "min_trades": 150,
-    "min_weeks": 20,
-    "min_expectancy_ci_low": 0.0,
-    "min_profit_factor": 1.3,
-    "min_sqn": 1.6
+    "min_trades": 120,
+    "min_weeks": 16,
+    "min_profit_factor": 1.35,
+    "min_expectancy_ci_low": 0.05,
+    "min_sqn": 1.7
   },
   "runtime": {
-    "data": {
-      "sources": [
-        "binance_vision",
-        "binance",
-        "bybit",
-        "okx"
-      ],
-      "limit_5m": 1000,
-      "limit_1h": 300,
-      "limit_4h": 220
-    },
     "ai": {
       "enabled": true,
-      "model": "claude-sonnet-5-5",
-      "max_reviews_per_run": 6,
-      "brief_interval_min": 60
+      "max_reviews_per_run": 3,
+      "model": "claude-sonnet-4-20250514"
     },
     "account": {
-      "equity_usd": 1000,
-      "risk_pct_pre_protocol": 0.25,
-      "risk_pct_post_protocol": 0.5,
-      "max_leverage": 1
+      "equity_usdt": 1000,
+      "risk_per_trade_pct": 0.75,
+      "max_leverage": 5
     }
   }
 }
