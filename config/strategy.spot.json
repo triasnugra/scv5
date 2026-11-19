@@ -157,7 +157,7 @@
       "equity_usd": 1000,
       "risk_pct_pre_protocol": 0.25,
       "risk_pct_post_protocol": 0.5,
-      "max_leverage": 3
+      "max_leverage": 1
     }
   }
 }
