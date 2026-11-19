@@ -129,7 +129,7 @@ def run(cfg, journal_path, out_dir, provider=None, now_ms=None, log=print):
             pool.append((c, info, d))
     if btc_ctx.get("shock"):
         log("[filter] BTC shock: tidak ada sinyal baru")
-    chosen = choose_signals(pool, sigs, flt, now_ms, shock=bool(btc_ctx.get("shock")), blocked=blocked)
+    chosen = choose_signals(pool, sigs, flt, now_ms, shock=bool(btc_ctx.get("shock")), blocked=blocked, cfg=cfg)
     active_syms = {s["symbol"] for s in sigs.values() if s["status"] in OPEN_STATUSES}
 
     # 6) review Claude (opsional)
