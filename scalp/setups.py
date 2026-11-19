@@ -1,13 +1,10 @@
-"""Deteksi setup scalping ala @eliz883 — versi 1.2 ElizStrict.
+"""Deteksi setup scalping ala @eliz883.
 
-Perubahan utama vs 1.1:
-- DEVIATION wajib retest setelah reclaim (require_retest).
-- Volume spike lebih ketat (default 2.2x).
-- RANGE_EDGE dimatikan default (kualitas rendah di market choppy).
-- Penalty keras untuk mid-range.
-- Stop buffer lebih realistis (0.45 ATR5).
-- Scoring lebih menekankan konfluensi & major pairs.
-- Semua entry tetap LIMIT di level (tidak chase).
+Tiga pola, semuanya berbasis TRIGGER (bukan prediksi) dan entry LIMIT di level presisi (tidak mengejar harga):
+  1. DEVIATION        : sweep likuiditas di atas/bawah level (range H1 / Monday) -> reclaim -> retest.  (stop run)
+  2. BREAKOUT_RETEST  : close H1 di luar range, terima di luar, entry pada retest pertama.
+  3. RANGE_EDGE       : penolakan (wick) di tepi range tanpa sweep; kualitas lebih rendah, butuh konfluensi.
+Semua kandidat harus lolos: stop kecil tapi tidak terlalu sempit, R:R minimal, biaya wajar.
 """
 from .indicators import atr, obv, sma_last
 from .context import season
@@ -58,14 +55,12 @@ def _vol_ratio(m5, idxs):
 
 
 def detect_deviation(m5, obv5, level, atr5, atr_h1, cfg):
-    """DEVIATION v1.2: sweep -> reclaim -> (wajib) retest. Lebih ketat."""
     d = cfg["rules"]["deviation"]
     L, side = level["price"], level["side"]
     n = len(m5)
     start = max(0, n - d["lookback_5m"])
     eps = L * d["pierce_min_pct"] / 100
     high_side = side == "high"
-
     if high_side:
         pierce = [i for i in range(start, n) if m5[i].h > L + eps]
         outside = lambda c: c.c > L
@@ -74,63 +69,38 @@ def detect_deviation(m5, obv5, level, atr5, atr_h1, cfg):
         outside = lambda c: c.c < L
     if not pierce:
         return None
-
     out_idx = [i for i in range(pierce[0], n) if outside(m5[i])]
     if len(out_idx) > d["max_outside_bars"]:
-        return None  # acceptance, bukan deviation
-
+        return None  # terlalu lama di luar = acceptance, bukan deviation
     r = (out_idx[-1] + 1) if out_idx else pierce[-1]
-    if r >= n:
-        return None
-
+    if r > n - 1:
+        return None  # belum ada reclaim
     margin = d["reclaim_margin_atr5"] * atr5
     rc = m5[r].c
-    if high_side and not (rc < L - margin):
+    if high_side and not rc < L - margin:
         return None
-    if not high_side and not (rc > L + margin):
+    if not high_side and not rc > L + margin:
         return None
-
-    # --- ElizStrict: wajib ada retest setelah reclaim ---
-    require_retest = d.get("require_retest", True)
-    retest_lb = d.get("retest_lookback_5m", 18)
+    last = m5[-1]
+    if (n - 1 - r) > d["lookback_5m"]:
+        return None
+    # retest belum terjadi (jangan mengejar): bar setelah reclaim tidak menyentuh level lagi
     after = m5[r + 1:]
-    if require_retest:
-        # Harus sudah menyentuh kembali zona level (retest) dalam window
-        retested = False
-        for c in after[-retest_lb:]:
-            if high_side and c.h >= L - margin * 0.5:
-                retested = True
-                break
-            if not high_side and c.l <= L + margin * 0.5:
-                retested = True
-                break
-        if not retested:
-            return None
-        # Setelah retest, harga tidak boleh sudah jauh menjauh (chase protection)
-        last = m5[-1]
-        if high_side and last.c < L - 1.5 * atr5:
-            return None
-        if not high_side and last.c > L + 1.5 * atr5:
-            return None
-    else:
-        # mode lama: jangan biarkan retest sudah terjadi
-        if high_side and any(c.h >= L for c in after):
-            return None
-        if not high_side and any(c.l <= L for c in after):
-            return None
-
+    if high_side and any(c.h >= L for c in after):
+        return None
+    if not high_side and any(c.l <= L for c in after):
+        return None
     extreme = max(m5[i].h for i in pierce) if high_side else min(m5[i].l for i in pierce)
     depth = abs(extreme - L)
-    if atr_h1 > 0 and depth / atr_h1 > d["max_sweep_atr_h1"]:
-        return None
-
+    if depth / atr_h1 > d["max_sweep_atr_h1"]:
+        return None  # sweep terlalu dalam = breakout sungguhan
     buf = d["stop_buffer_atr5"] * atr5
     off = d["entry_offset_atr5"] * atr5
     if high_side:
         direction, entry, stop = SHORT, L - off, extreme + buf
     else:
         direction, entry, stop = LONG, L + off, extreme - buf
-
+    # OBV & volume
     e_idx = max(pierce, key=lambda i: m5[i].h) if high_side else min(pierce, key=lambda i: m5[i].l)
     w = d["obv_window"]
     lo_i = max(0, e_idx - w)
@@ -143,30 +113,19 @@ def detect_deviation(m5, obv5, level, atr5, atr_h1, cfg):
     sgn = 1 if direction == LONG else -1
     obv_confirm = (obv5[-1] - obv5[max(0, n - 7)]) * sgn > 0
     vr = _vol_ratio(m5, pierce)
-
-    strong_reclaim = abs(rc - L) > 0.25 * atr5
     txt = (f"Sweep {'di atas' if high_side else 'di bawah'} {level['kind']} {fmt(L)} (ekstrem {fmt(extreme)}), "
-           f"reclaim + retest terkonfirmasi; entry LIMIT di {fmt(entry)}.")
+           f"lalu reclaim close kembali ke dalam; tunggu retest di {fmt(entry)}.")
     return {
         "setup": "DEVIATION", "direction": direction, "entry": entry, "stop": stop,
-        "level": {"price": L, "kind": level["kind"], "touches": level["touches"], "monday": level.get("monday", False)},
-        "flags": {
-            "vol_ratio": round(vr, 2),
-            "vol_spike": vr >= d["vol_spike_ratio"],
-            "obv_div": bool(obv_div),
-            "obv_confirm": bool(obv_confirm),
-            "sweep_depth_atr_h1": round(depth / atr_h1, 2) if atr_h1 else 0,
-            "strong_reclaim": strong_reclaim,
-        },
+        "level": {"price": L, "kind": level["kind"], "touches": level["touches"], "monday": level["monday"]},
+        "flags": {"vol_ratio": round(vr, 2), "vol_spike": vr >= d["vol_spike_ratio"], "obv_div": bool(obv_div),
+                  "obv_confirm": bool(obv_confirm), "sweep_depth_atr_h1": round(depth / atr_h1, 2)},
         "reasons": [txt], "targets_extra": [],
     }
 
 
 def detect_range_edge(m5, obv5, rng, side, atr5, atr_h1, cfg):
-    """RANGE_EDGE dimatikan default di 1.2 karena winrate rendah di market choppy."""
     rc = cfg["rules"]["range_edge"]
-    if not rc.get("enabled", False):
-        return None
     L = rng["high"] if side == "high" else rng["low"]
     zone = rc["edge_zone_atr_h1"] * atr_h1
     eps = L * cfg["rules"]["deviation"]["pierce_min_pct"] / 100
@@ -189,242 +148,158 @@ def detect_range_edge(m5, obv5, rng, side, atr5, atr_h1, cfg):
                 best = i
     if best is None:
         return None
-    c = m5[best]
+    rej, after, last = m5[best], m5[best + 1:], m5[-1]
     buf = rc["stop_buffer_atr_h1"] * atr_h1
     if side == "high":
-        direction, entry, stop = SHORT, L, c.h + buf
+        if any(c.h >= rej.h for c in after) or last.c >= rej.h:
+            return None
+        direction, entry, stop = SHORT, rej.h, max(L, rej.h) + buf
     else:
-        direction, entry, stop = LONG, L, c.l - buf
-    vr = _vol_ratio(m5, [best])
+        if any(c.l <= rej.l for c in after) or last.c <= rej.l:
+            return None
+        direction, entry, stop = LONG, rej.l, min(L, rej.l) - buf
+    sgn = 1 if direction == LONG else -1
+    obv_confirm = (obv5[-1] - obv5[max(0, n - 7)]) * sgn > 0
+    touches = rng["touches_high"] if side == "high" else rng["touches_low"]
     return {
         "setup": "RANGE_EDGE", "direction": direction, "entry": entry, "stop": stop,
-        "level": {"price": L, "kind": "range_" + side, "touches": rng.get("touches", 0), "monday": False},
-        "flags": {"vol_ratio": round(vr, 2), "vol_spike": vr >= 1.8, "obv_div": False, "obv_confirm": False,
-                  "sweep_depth_atr_h1": 0.0},
-        "reasons": [f"Wick rejection di tepi range {side} {fmt(L)}"], "targets_extra": [],
+        "level": {"price": L, "kind": "range_high" if side == "high" else "range_low", "touches": touches,
+                  "monday": False},
+        "flags": {"vol_ratio": 0.0, "vol_spike": False, "obv_div": False, "obv_confirm": bool(obv_confirm)},
+        "reasons": [f"Penolakan (wick) di tepi range {fmt(L)} tanpa sweep; entry limit di {fmt(entry)}."],
+        "targets_extra": [],
     }
 
 
-def detect_breakout_retest(m5, h1, rng, atr5, atr_h1, cfg):
-    """BREAKOUT_RETEST: close H1 diterima di luar range, lalu retest."""
-    br = cfg["rules"]["breakout_retest"]
-    if not br.get("enabled", True):
-        return None
-    # Simplified: look for recent H1 close outside + current price near the broken level
-    # (full original logic retained in spirit; keep deterministic)
+def detect_breakout_retest(h1, m5, obv5, rng, side, atr5, atr_h1, cfg):
+    bc = cfg["rules"]["breakout_retest"]
     n = len(h1)
-    if n < br["min_accept_h1"] + 3:
+    first = n - rng["end_off"]
+    L = rng["high"] if side == "high" else rng["low"]
+    buf = bc["break_buffer_atr_h1"] * atr_h1
+    sgn = 1 if side == "high" else -1  # arah breakout
+    b = None
+    for i in range(first, n):
+        if (h1[i].c - L) * sgn > buf:
+            b = i
+            break
+    if b is None or n - 1 - b > bc["max_age_h1"]:
         return None
-    high, low = rng["high"], rng["low"]
-    buf = br["break_buffer_atr_h1"] * atr_h1
-    # find last accepted break
-    break_dir = None
-    break_idx = None
-    for i in range(n - 1, max(0, n - br["max_age_h1"] - 1), -1):
-        c = h1[i]
-        if c.c > high + buf:
-            # check acceptance
-            accepts = sum(1 for j in range(i, min(n, i + br["min_accept_h1"] + 1)) if h1[j].c > high)
-            if accepts >= br["min_accept_h1"]:
-                break_dir, break_idx = "up", i
-                break
-        if c.c < low - buf:
-            accepts = sum(1 for j in range(i, min(n, i + br["min_accept_h1"] + 1)) if h1[j].c < low)
-            if accepts >= br["min_accept_h1"]:
-                break_dir, break_idx = "down", i
-                break
-    if break_dir is None:
+    if any((h1[i].c - L) * sgn <= -buf for i in range(b, n)):
+        return None  # breakout gagal
+    if sum(1 for i in range(b, n) if (h1[i].c - L) * sgn > 0) < bc["min_accept_h1"]:
         return None
-    level_price = high if break_dir == "up" else low
-    # retest: price near level now
-    last5 = m5[-1]
-    off = br["entry_offset_atr5"] * atr5
-    if break_dir == "up":
-        if abs(last5.c - level_price) > 1.2 * atr5:
-            return None
-        direction, entry, stop = LONG, level_price + off, level_price - br["stop_atr_h1"] * atr_h1
-    else:
-        if abs(last5.c - level_price) > 1.2 * atr5:
-            return None
-        direction, entry, stop = SHORT, level_price - off, level_price + br["stop_atr_h1"] * atr_h1
+    h = rng["height"]
+    tp1 = L + sgn * h * bc["tp1_range_frac"]
+    tp2 = L + sgn * h * bc["tp2_range_frac"]
+    extreme_since = max(h1[i].h for i in range(b, n)) if sgn == 1 else min(h1[i].l for i in range(b, n))
+    if (extreme_since - tp1) * sgn >= 0:
+        return None  # target sudah tercapai tanpa kita
+    off = bc["entry_offset_atr5"] * atr5
+    entry = L + sgn * off
+    t_after = h1[b].t + H1_MS
+    if any((c.l <= entry) if sgn == 1 else (c.h >= entry) for c in m5 if c.t >= t_after):
+        return None  # retest pertama sudah lewat
+    last = m5[-1]
+    if (last.c - entry) * sgn <= 0:
+        return None
+    stop = L - sgn * bc["stop_atr_h1"] * atr_h1
+    direction = LONG if sgn == 1 else SHORT
+    obv_confirm = (obv5[-1] - obv5[max(0, len(m5) - 13)]) * sgn > 0
+    touches = rng["touches_high"] if side == "high" else rng["touches_low"]
     return {
         "setup": "BREAKOUT_RETEST", "direction": direction, "entry": entry, "stop": stop,
-        "level": {"price": level_price, "kind": "break_" + break_dir, "touches": 1, "monday": False},
-        "flags": {"vol_ratio": 1.0, "vol_spike": False, "obv_div": False, "obv_confirm": False,
-                  "sweep_depth_atr_h1": 0.0},
-        "reasons": [f"Breakout {break_dir} diterima, retest level {fmt(level_price)}"], "targets_extra": [],
+        "level": {"price": L, "kind": "range_high" if side == "high" else "range_low", "touches": touches,
+                  "monday": False},
+        "flags": {"vol_ratio": 0.0, "vol_spike": False, "obv_div": False, "obv_confirm": bool(obv_confirm)},
+        "reasons": [f"Breakout H1 {'ke atas' if sgn == 1 else 'ke bawah'} dari range {fmt(L)} diterima di luar; "
+                    f"tunggu retest pertama di {fmt(entry)}."],
+        "targets_extra": [{"price": tp1, "label": "measured move 0.5x range"},
+                          {"price": tp2, "label": "measured move 1.0x range"}],
     }
 
 
-def score_candidate(c, info, cfg, btc_ctx, symbol):
-    """Skor 0-10+ dengan penalti mid-range dan bonus major."""
+def score_candidate(c, sym_season, now_weekday, cfg):
     sc = cfg["rules"]["scoring"]
-    flt = cfg["rules"]["filters"]
-    score = float(sc["base"].get(c["setup"], 0))
-    notes = [f"dasar {c['setup']} +{sc['base'].get(c['setup'], 0)}"]
-
-    touches = c["level"].get("touches", 0)
-    if touches >= 3:
-        score += sc["touches_ge3_bonus"]
-        notes.append(f"level diuji {touches}x +{sc['touches_ge3_bonus']}")
-    elif touches >= 2:
-        score += sc["touches_ge2_bonus"]
-        notes.append(f"level diuji {touches}x +{sc['touches_ge2_bonus']}")
-
-    flags = c.get("flags", {})
-    if flags.get("vol_spike"):
-        score += sc["vol_spike_bonus"]
-        notes.append(f"lonjakan volume +{sc['vol_spike_bonus']}")
-    if flags.get("obv_div"):
-        score += sc["obv_div_bonus"]
-        notes.append("OBV divergence +1")
-    if flags.get("obv_confirm"):
-        score += sc["obv_confirm_bonus"]
-        notes.append("OBV confirm +1")
-    if flags.get("strong_reclaim"):
-        score += sc.get("strong_reclaim_bonus", 0)
-        notes.append("strong reclaim +1")
-
-    # season
-    sea = c.get("season") or info.get("season")
-    if sea and btc_ctx.get("season"):
-        if sea == btc_ctx["season"]:
-            score += sc["season_align_bonus"]
-            notes.append(f"searah musim +{sc['season_align_bonus']}")
-        else:
-            score -= sc["counter_season_penalty"]
-            notes.append(f"lawan musim -{sc['counter_season_penalty']}")
-
-    # Monday
-    if c["level"].get("monday"):
-        score += sc["monday_bonus"]
-        notes.append("Monday level +1")
-    if info.get("monday_choppy"):
-        score -= sc["monday_choppy_penalty"]
-        notes.append(f"Senin choppy -{sc['monday_choppy_penalty']}")
-
-    # R:R
-    if c.get("rr1", 0) >= 2.5:
-        score += sc.get("rr_ge25_bonus", 0) + sc.get("rr_ge2_bonus", 0)
-        notes.append("R:R >= 2.5 +2")
-    elif c.get("rr1", 0) >= 2.0:
-        score += sc.get("rr_ge2_bonus", 0)
-        notes.append("R:R >= 2 +1")
-
-    # Mid-range ban / penalty (ElizStrict)
-    pos = info.get("range_pos")
-    if pos is not None and flt.get("ban_mid_range", True):
-        lo, hi = flt.get("mid_range_low", 0.38), flt.get("mid_range_high", 0.62)
-        if lo < pos < hi:
-            score -= sc.get("mid_range_penalty", 4)
-            notes.append(f"MID-RANGE penalty -{sc.get('mid_range_penalty', 4)}")
-
-    # Major bonus
-    majors = cfg.get("universe", {}).get("priority_majors", [])
-    if symbol in majors:
-        score += sc.get("major_bonus", 0)
-        notes.append("major pair +1")
-
-    c["score"] = round(score, 1)
-    c["score_notes"] = notes
-    return c
+    s = sc["base"][c["setup"]]
+    notes = [f"dasar {c['setup']} +{s}"]
+    t = c["level"]["touches"]
+    if t >= 3:
+        s += sc["touches_ge3_bonus"]; notes.append(f"level diuji {t}x +{sc['touches_ge3_bonus']}")
+    elif t >= 2:
+        s += sc["touches_ge2_bonus"]; notes.append(f"level diuji {t}x +{sc['touches_ge2_bonus']}")
+    f = c["flags"]
+    if c["level"]["monday"]:
+        s += sc["monday_bonus"]; notes.append("level Monday +%d" % sc["monday_bonus"])
+    if f["vol_spike"]:
+        s += sc["vol_spike_bonus"]; notes.append("lonjakan volume saat sweep +%d" % sc["vol_spike_bonus"])
+    if f["obv_div"]:
+        s += sc["obv_div_bonus"]; notes.append("divergensi OBV +%d" % sc["obv_div_bonus"])
+    if f["obv_confirm"]:
+        s += sc["obv_confirm_bonus"]; notes.append("OBV searah +%d" % sc["obv_confirm_bonus"])
+    want = "long" if c["direction"] == LONG else "short"
+    if sym_season == want:
+        s += sc["season_align_bonus"]; notes.append("searah musim H4 +%d" % sc["season_align_bonus"])
+    elif sym_season in ("long", "short"):
+        s -= sc["counter_season_penalty"]; notes.append("melawan musim H4 -%d" % sc["counter_season_penalty"])
+    if c["rr1"] >= 2:
+        s += sc["rr_ge2_bonus"]; notes.append("R:R>=2 +%d" % sc["rr_ge2_bonus"])
+    if now_weekday == 0:
+        s -= sc["monday_choppy_penalty"]; notes.append("Senin (range Monday choppy) -%d" % sc["monday_choppy_penalty"])
+    return max(0, min(10, s)), notes
 
 
-def generate_candidates(symbol, d, cfg, now_ms, weekday):
-    """Hasilkan kandidat + info market + daftar reject reasons."""
-    m5 = d.get("5m") or []
-    h1 = d.get("1h") or []
-    if len(m5) < 80 or len(h1) < 40:
-        return [], {"symbol": symbol, "rejects": ["data_kurang"]}, ["data_kurang"]
-
-    atr5 = atr(m5, 14) or 0.0
-    atr_h1 = atr(h1, 14) or 0.0
+def generate_candidates(symbol, data, cfg, now_ms, weekday):
+    """Return (kandidat[], info_pasar{}, rejects{}). data = {'5m','1h','4h'}."""
+    m5, h1, h4 = data["5m"], data["1h"], data.get("4h", [])
+    rejects = {}
+    if len(m5) < 120 or len(h1) < 100:
+        return [], {"error": "data_kurang"}, rejects
+    atr5 = atr(m5[-150:], 14)
+    atr_h1 = atr(h1[-120:], 14)
     if atr5 <= 0 or atr_h1 <= 0:
-        return [], {"symbol": symbol}, ["atr_invalid"]
-
+        return [], {"error": "atr_nol"}, rejects
+    ranges = find_ranges(h1, atr_h1, cfg)
+    monday = monday_levels(h1, now_ms) if cfg["rules"]["monday"]["enabled"] else None
+    levels = collect_levels(ranges, monday, atr_h1)
+    targets = target_levels(ranges, monday, h1, cfg["rules"]["plan"]["swing_pivot_n"])
+    sym_season = season(h4)
     obv5 = obv(m5)
-    ranges = find_ranges(h1, cfg)
-    levels = collect_levels(ranges, monday_levels(h1, cfg), cfg)
-    sea = season(h1, cfg)
-    last = m5[-1]
-    # range position 0..1
-    rng = ranges[0] if ranges else None
-    range_pos = None
-    if rng and rng["high"] > rng["low"]:
-        range_pos = (last.c - rng["low"]) / (rng["high"] - rng["low"])
-
-    info = {
-        "symbol": symbol,
-        "price": last.c,
-        "atr5": atr5,
-        "atr_h1": atr_h1,
-        "season": sea,
-        "range_pos": range_pos,
-        "monday_choppy": weekday == 0 and bool(cfg["rules"]["monday"].get("enabled")),
-        "n_levels": len(levels),
-    }
-
-    candidates = []
-    rejects = []
-
-    # 1. DEVIATION (utama)
+    raw = []
     for lv in levels:
-        cand = detect_deviation(m5, obv5, lv, atr5, atr_h1, cfg)
-        if cand:
-            targets = target_levels(cand["direction"], cand["entry"], ranges, h1, cfg)
-            plan, why = plan_trade(cand["direction"], cand["entry"], cand["stop"], targets, cfg)
-            if plan:
-                cand.update(plan)
-                cand["symbol"] = symbol
-                cand["season"] = sea
-                cand["price_at_signal"] = last.c
-                score_candidate(cand, info, cfg, {"season": sea}, symbol)
-                candidates.append(cand)
-            else:
-                rejects.append(f"deviation_{lv['kind']}:{why}")
-        else:
-            rejects.append(f"deviation_{lv.get('kind','?')}:no_trigger")
-
-    # 2. BREAKOUT_RETEST
-    if rng:
-        cand = detect_breakout_retest(m5, h1, rng, atr5, atr_h1, cfg)
-        if cand:
-            targets = target_levels(cand["direction"], cand["entry"], ranges, h1, cfg)
-            plan, why = plan_trade(cand["direction"], cand["entry"], cand["stop"], targets, cfg)
-            if plan:
-                cand.update(plan)
-                cand["symbol"] = symbol
-                cand["season"] = sea
-                cand["price_at_signal"] = last.c
-                score_candidate(cand, info, cfg, {"season": sea}, symbol)
-                candidates.append(cand)
-            else:
-                rejects.append(f"breakout:{why}")
-
-    # 3. RANGE_EDGE (hanya jika enabled)
-    if rng and cfg["rules"]["range_edge"].get("enabled"):
+        d = detect_deviation(m5, obv5, lv, atr5, atr_h1, cfg)
+        if d:
+            raw.append(d)
+    for r in ranges:
         for side in ("high", "low"):
-            cand = detect_range_edge(m5, obv5, rng, side, atr5, atr_h1, cfg)
-            if cand:
-                targets = target_levels(cand["direction"], cand["entry"], ranges, h1, cfg)
-                plan, why = plan_trade(cand["direction"], cand["entry"], cand["stop"], targets, cfg)
-                if plan:
-                    cand.update(plan)
-                    cand["symbol"] = symbol
-                    cand["season"] = sea
-                    cand["price_at_signal"] = last.c
-                    score_candidate(cand, info, cfg, {"season": sea}, symbol)
-                    candidates.append(cand)
-
-    # Final hard filter: mid-range ban
-    flt = cfg["rules"]["filters"]
-    if flt.get("ban_mid_range") and range_pos is not None:
-        lo, hi = flt.get("mid_range_low", 0.38), flt.get("mid_range_high", 0.62)
-        if lo < range_pos < hi:
-            candidates = []
-            rejects.append("MID_RANGE_BAN")
-
-    # Sort by score desc
-    candidates.sort(key=lambda x: -x.get("score", 0))
-    info["rejects"] = rejects[:12]
-    return candidates, info, rejects[:12]
+            if cfg["rules"]["range_edge"]["enabled"]:
+                e = detect_range_edge(m5, obv5, r, side, atr5, atr_h1, cfg)
+                if e:
+                    raw.append(e)
+            if cfg["rules"]["breakout_retest"]["enabled"]:
+                b = detect_breakout_retest(h1, m5, obv5, r, side, atr5, atr_h1, cfg)
+                if b:
+                    raw.append(b)
+    price = m5[-1].c
+    out = []
+    for c in raw:
+        dist = abs(c["entry"] - price) / price * 100
+        if dist > cfg["rules"]["plan"]["max_entry_distance_pct"]:
+            rejects["entry_terlalu_jauh"] = rejects.get("entry_terlalu_jauh", 0) + 1
+            continue
+        plan, why = plan_trade(c["direction"], c["entry"], c["stop"], c["targets_extra"] + targets, cfg)
+        if not plan:
+            rejects[why] = rejects.get(why, 0) + 1
+            continue
+        c.update(plan)
+        c["symbol"] = symbol
+        c["score"], c["score_notes"] = score_candidate(c, sym_season, weekday, cfg)
+        c["price_at_signal"] = price
+        c["season"] = sym_season
+        out.append(c)
+    out.sort(key=lambda x: -x["score"])
+    info = {
+        "price": price, "atr5": atr5, "atr_h1": atr_h1, "atr_h1_pct": round(atr_h1 / price * 100, 3),
+        "season": sym_season, "ranges": ranges, "monday": monday, "levels": levels,
+    }
+    return out, info, rejects
